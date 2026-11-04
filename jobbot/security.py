@@ -1,8 +1,10 @@
 """Security helpers: SSRF-safe URL validation and HTML sanitisation."""
 import ipaddress
+import re
 import socket
 from urllib.parse import urlparse
 import bleach
+from bs4 import BeautifulSoup
 
 
 class UnsafeURL(ValueError):
@@ -49,6 +51,29 @@ ALLOWED_ATTRS = {"a": ["href", "title", "rel", "target"], "img": ["src", "alt", 
 
 
 def sanitize_html(html: str) -> str:
-    """Strip scripts, styles, event handlers, javascript: URLs etc."""
-    return bleach.clean(html or "", tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS,
+    """Keep safe semantic bold formatting while stripping source styles and unsafe markup."""
+    html = re.sub(
+        r"&lt;(/?(?:b|strong))&gt;",
+        lambda match: f"<{match.group(1)}>",
+        html or "",
+        flags=re.I,
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup.find_all(True):
+        declarations = tag.get("style", "")
+        styled_bold = any(
+            name.strip().lower() == "font-weight"
+            and re.fullmatch(r"(?:bold|bolder|[6-9]00)\s*(?:!important)?", value.strip(), re.I)
+            for name, _, value in (declaration.partition(":") for declaration in declarations.split(";"))
+            if _
+        )
+        class_names = tag.get("class") or []
+        class_bold = any(
+            re.search(r"(?:^|[-_])(?:b|bold|strong|fw-bold|font-weight-bold)(?:$|[-_])", name, re.I)
+            or re.search(r"(?:font|text)[-_]?bold", name, re.I)
+            for name in class_names
+        )
+        if (styled_bold or class_bold) and tag.name not in ("b", "strong"):
+            tag.name = "strong"
+    return bleach.clean(str(soup), tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS,
                         protocols=["http", "https", "mailto"], strip=True)

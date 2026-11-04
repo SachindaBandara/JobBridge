@@ -23,6 +23,32 @@ def test_ssrf_blocked(u):
 def test_sanitize_strips_scripts():
     out = sanitize_html('<p onclick="x()">Hi</p><script>alert(1)</script><a href="javascript:evil()">a</a>')
     assert "<script" not in out and "onclick" not in out and "javascript:" not in out
+    assert "style=" not in sanitize_html('<p style="color:red;background:url(javascript:alert(1))">Safe text</p>')
+
+
+@pytest.mark.parametrize("weight", ["bold", "bolder", "600", "700", "900", "700 !important"])
+def test_sanitizer_preserves_bold_inline_style_as_safe_strong(weight):
+    out = sanitize_html(f'<p>Normal <span style="font-weight: {weight}; color:red" onclick="bad()">emphasis</span></p>')
+    assert "<strong>emphasis</strong>" in out
+    assert "font-weight" not in out and "color:red" not in out and "onclick" not in out
+
+
+def test_sanitizer_keeps_semantic_bold_tags_and_ignores_normal_weight():
+    out = sanitize_html('<p><b>Bold B</b> <strong>Bold strong</strong> <span style="font-weight:400">Regular</span></p>')
+    assert "<b>Bold B</b>" in out
+    assert "<strong>Bold strong</strong>" in out
+    assert "<span>Regular</span>" in out
+
+
+@pytest.mark.parametrize("class_name", ["bold", "text-bold", "fw-bold", "font-weight-bold"])
+def test_sanitizer_preserves_bold_class_as_safe_strong(class_name):
+    out = sanitize_html(f'<span class="{class_name}">Emphasis</span>')
+    assert out == "<strong>Emphasis</strong>"
+
+
+def test_sanitizer_decodes_encoded_bold_markup_before_sanitizing():
+    out = sanitize_html("&lt;strong&gt;Encoded emphasis&lt;/strong&gt;")
+    assert out == "<strong>Encoded emphasis</strong>"
 
 
 JOB_HTML = """<html><head><title>x</title><script type="application/ld+json">
@@ -37,15 +63,18 @@ def test_jsonld_and_render_escapes():
     job.title = "<b>x</b>"
     job.company = '<img src=x onerror=alert(1)>'
     html = render_post(job)
-    assert "onerror" not in html
+    assert "<img src=x onerror" not in html
+    assert "&lt;b&gt;x&lt;/b&gt;" in html
     assert "<b>x</b>" not in html
     assert "https://acme.test/jobs/1" not in html
+    assert 'font-family:Montserrat,Arial,Helvetica,sans-serif' in html
 
 
 def test_job_logo_dates_and_full_description_render_without_metadata_or_source():
     page = """<html><head><script type="application/ld+json">
     {"@type":"JobPosting","title":"Sales Executive","datePosted":"2026-11-04T09:49:36+05:30",
      "validThrough":"2027-02-02T23:59:59+05:30",
+     "employmentType":"FULL_TIME",
      "hiringOrganization":{"name":"WAD International","logo":{"@type":"ImageObject","url":"/images/wad-logo.png"}},
      "image":"/job_images/sales-ad.png",
      "description":"<p>First paragraph with the complete role details.</p><ul><li>Second detail.</li></ul>"}
@@ -54,12 +83,18 @@ def test_job_logo_dates_and_full_description_render_without_metadata_or_source()
     post = render_post(job)
     assert job.company_logo_url == "https://itpro.lk/images/wad-logo.png"
     assert job.advertisement_image_url == "https://itpro.lk/job_images/sales-ad.png"
-    assert post.index("<img") < post.index("Posted:")
+    assert post.index("<img") < post.index(">Posted</span>")
     assert 'src="https://itpro.lk/images/wad-logo.png"' in post
     assert 'src="https://itpro.lk/job_images/sales-ad.png"' not in post
     assert 'alt="Job advertisement"' not in post
-    assert "Posted:</strong> 2026-11-04" in post
-    assert "Apply before:</strong> 2027-02-02" in post
+    assert ">Posted</span>" in post and ">2026-11-04</strong>" in post
+    assert ">Job position</span>" in post and ">Sales Executive</strong>" in post
+    assert ">Employment type</span>" in post and ">Full Time</strong>" in post
+    assert ">Company</span>" not in post
+    assert "Apply before" not in post and "2027-02-02" not in post
+    assert "family=Montserrat" in post and "font-family:Montserrat,Arial,Helvetica,sans-serif" in post
+    assert "Job description</h2>" in post
+    assert "background-color:#f3f8f4" in post
     assert "First paragraph with the complete role details." in post
     assert "<li>Second detail.</li>" in post
     assert "Company:" not in post and "Location:" not in post and "Type:" not in post
@@ -82,6 +117,23 @@ def test_web_job_round_trip_preserves_full_sanitized_description():
     assert "First detail." in post and "<li>Second detail.</li>" in post
     assert "javascript:" not in post
     assert restored.company_logo_url == "https://jobs.test/acme.png"
+
+
+def test_blogger_template_preserves_bold_description_text_through_web_round_trip():
+    from jobbot.web import _job_data, _job_from_data
+    job = parse_job(
+        """<script type="application/ld+json">
+        {"@type":"JobPosting","title":"Developer","description":
+         "<p><strong>Required qualifications</strong></p><p><span class='fw-bold'>Five years experience</span></p><p>&lt;strong&gt;Encoded requirement&lt;/strong&gt;</p>"}
+        </script>""",
+        "https://jobs.test/job/1",
+    )
+    restored = _job_from_data(_job_data(job))
+    post = render_post(restored)
+    assert "<strong>Required qualifications</strong>" in post
+    assert "<strong>Five years experience</strong>" in post
+    assert "<strong>Encoded requirement</strong>" in post
+    assert "font-weight:700" not in post
 
 
 def test_listing_and_feed():

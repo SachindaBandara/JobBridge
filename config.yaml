@@ -1,0 +1,25 @@
+# Safe defaults: posts are created as DRAFTS so you review before publishing.
+blogger:
+  publish_immediately: false     # true = go live (or use --publish on the CLI)
+  labels: ["Jobs"]
+
+fetch:
+  timeout_seconds: 15
+  max_bytes: 2000000
+  delay_per_domain_seconds: 3
+  respect_robots_txt: true
+  allowed_domains: []            # empty = any public site; or e.g. ["example-jobs.com"]
+
+content:
+  excerpt_chars: 600             # short excerpt only; readers click through to the source
+  use_ai_summary: false          # needs GEMINI_API_KEY
+
+sources:
+  # A listing page, a category page, or an RSS/Atom feed URL.
+  - type: website
+    url: https://example-jobs.com/feed
+    max_items: 5
+  # Text export / pasted messages from a WhatsApp channel (see README).
+  # - type: whatsapp_file
+  #   path: data/whatsapp_channel.txt
+  #   max_items: 10

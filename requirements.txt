@@ -1,0 +1,11 @@
+requests>=2.32
+beautifulsoup4>=4.12
+lxml>=5.2
+feedparser>=6.0
+bleach>=6.1
+PyYAML>=6.0
+python-dotenv>=1.0
+google-api-python-client>=2.130
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2
+pytest>=8.0

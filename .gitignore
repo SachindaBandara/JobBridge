@@ -1,0 +1,8 @@
+.env
+token.json
+client_secret.json
+data/*.db
+data/generated_images/
+__pycache__/
+.venv/
+*.pyc

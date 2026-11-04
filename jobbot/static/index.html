@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f5">
+  <link rel="icon" href="data:,">
+  <title>JobBridge — Job intelligence</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="JobBridge home">
+      <span class="brand-mark">J</span>
+      <span>jobbridge<span class="brand-period">.</span></span>
+    </a>
+    <div class="topbar-meta"><span class="live-dot"></span> Private workspace <span class="topbar-divider">/</span> Local only</div>
+  </header>
+
+  <main class="shell">
+    <section class="intro">
+      <div>
+        <p class="eyebrow">JOB DISCOVERY, WITHOUT THE BUSYWORK</p>
+        <h1>Find the right<br><span>opportunity.</span></h1>
+        <p class="intro-copy">Bring a job board or feed. We’ll gather each role’s details, links, and image references in one clear view.</p>
+      </div>
+      <div class="intro-note"><span class="note-icon">✳</span><p>Every listing stays linked to its original source. Review everything before saving a Blogger draft.</p></div>
+    </section>
+
+    <section class="search-panel" aria-labelledby="scan-title">
+      <div class="section-kicker"><span>01</span> SOURCE</div>
+      <div class="search-heading">
+        <div><h2 id="scan-title">Start with a job board</h2><p>Paste a public listing page or an RSS / Atom feed.</p></div>
+        <button id="history-toggle" class="text-button" type="button">View recent drafts <span>↗</span></button>
+      </div>
+      <form id="scan-form">
+        <label class="sr-only" for="source-url">Job board URL</label>
+        <span class="input-icon" aria-hidden="true">⌕</span>
+        <input id="source-url" name="url" type="url" placeholder="https://careers.example.com/jobs" autocomplete="url" required>
+        <label class="sr-only" for="max-items">Maximum jobs</label>
+        <select id="max-items" name="max_items" aria-label="Maximum jobs">
+          <option value="5">5 jobs</option><option value="10" selected>10 jobs</option><option value="20">20 jobs</option><option value="30">30 jobs</option>
+        </select>
+        <button id="scan-button" class="primary-button" type="submit"><span>Scan listings</span><span aria-hidden="true">→</span></button>
+      </form>
+      <div class="quick-url">
+        <span>Or open a single job</span>
+        <input id="job-url" type="url" placeholder="https://company.com/careers/role">
+        <button id="job-button" class="secondary-button" type="button">Fetch job <span>↗</span></button>
+      </div>
+      <p class="privacy-line"><span>⌑</span> Public pages only · robots.txt respected · No automatic publishing</p>
+    </section>
+
+    <section id="workspace" class="workspace" hidden>
+      <div class="results-heading">
+        <div><div class="section-kicker"><span>02</span> REVIEW</div><h2>Your opportunities <span id="job-count" class="count-pill">0</span></h2></div>
+        <p id="results-caption"></p>
+      </div>
+      <div id="alerts" class="alerts" role="status" aria-live="polite"></div>
+      <div id="job-list" class="job-list"></div>
+    </section>
+
+    <section id="history-panel" class="history-panel" hidden>
+      <div class="results-heading"><div><div class="section-kicker"><span>03</span> HISTORY</div><h2>Recent Blogger drafts</h2></div><button id="history-close" class="text-button" type="button">Close <span>×</span></button></div>
+      <div id="history-list" class="history-list"></div>
+    </section>
+
+    <footer><span>JOBBRIDGE <span class="brand-period">●</span> BUILT FOR A BETTER SEARCH</span><span>Always verify role details with the employer.</span></footer>
+  </main>
+</body>
+</html>

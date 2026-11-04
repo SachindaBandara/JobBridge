@@ -14,6 +14,7 @@ from .ai import GeminiAPIError, generate_image, summarize
 from .extractors import Job, parse_job
 from .fetcher import Fetcher, FetchError
 from .pipeline import collect_links
+from .post_metadata import post_labels, post_title, search_description
 from .render import render_post
 from .security import sanitize_html, validate_url
 from .storage import Store
@@ -34,12 +35,13 @@ class APIError(Exception):
         self.status = status
 
 
-def _job_data(job: Job, status: str = "ready") -> dict:
+def _job_data(job: Job, status: str = "ready", configured_labels: list[str] | None = None) -> dict:
     description = BeautifulSoup(job.description_html, "lxml").get_text(" ", strip=True)
     return {
         "title": job.title,
         "source_url": job.source_url,
         "company": job.company,
+        "organization_type": job.organization_type,
         "location": job.location,
         "employment_type": job.employment_type,
         "date_posted": job.date_posted,
@@ -50,6 +52,9 @@ def _job_data(job: Job, status: str = "ready") -> dict:
         "summary": job.summary,
         "company_logo_url": job.company_logo_url,
         "advertisement_image_url": job.advertisement_image_url,
+        "suggested_labels": post_labels(job, configured_labels),
+        "blogger_title": post_title(job),
+        "search_description": search_description(job),
         "images": job.images,
         "links": job.links,
         "status": status,
@@ -67,6 +72,7 @@ def _job_from_data(data: dict) -> Job:
         title=title,
         source_url=source_url,
         company=str(data.get("company") or "")[:300],
+        organization_type=str(data.get("organization_type") or "")[:200],
         location=str(data.get("location") or "")[:500],
         employment_type=str(data.get("employment_type") or "")[:200],
         date_posted=str(data.get("date_posted") or "")[:100],
@@ -208,7 +214,11 @@ def create_handler(cfg: dict):
                                 job.summary = summarize(job, cfg, raise_errors=True)
                             except GeminiAPIError as e:
                                 errors.append(_error_item(final_url, e))
-                    jobs.append(_job_data(job, "already processed" if store.seen(final_url) else "ready"))
+                    jobs.append(_job_data(
+                        job,
+                        "already processed" if store.seen(final_url) else "ready",
+                        cfg.get("blogger", {}).get("labels", []),
+                    ))
                 except Exception as e:
                     log.warning("Could not scan job %s: %s", link, type(e).__name__)
                     errors.append(_error_item(link, e))
@@ -224,7 +234,9 @@ def create_handler(cfg: dict):
                 raise APIError(str(e), 422) from e
             job = parse_job(page, final_url)
             status = "already processed" if Store().seen(final_url) else "ready"
-            self._json(200, {"job": _job_data(job, status)})
+            self._json(200, {
+                "job": _job_data(job, status, cfg.get("blogger", {}).get("labels", []))
+            })
 
         def _summarize(self, data: dict):
             if not cfg["env"]["gemini_key"]:
@@ -263,15 +275,25 @@ def create_handler(cfg: dict):
                 raise APIError("This job has already been processed.", 409)
             from .blogger import Blogger
             content = render_post(job, cfg["content"]["excerpt_chars"])
+            title = post_title(job)
+            labels = post_labels(job, cfg.get("blogger", {}).get("labels", []))
+            description = search_description(job)
             try:
-                post = Blogger(cfg).insert(job.title, content, cfg["blogger"]["labels"], is_draft=True)
+                post = Blogger(cfg).insert(title, content, labels, is_draft=True)
             except SystemExit as e:
                 raise APIError(str(e), 503) from e
             except Exception as e:
                 log.exception("Blogger draft creation failed")
                 raise APIError(f"Blogger draft creation failed ({type(e).__name__}); check the application logs.", 502) from e
-            store.add(job.source_url, job.title, "draft", post.get("id", ""))
-            self._json(200, {"status": "draft", "url": post.get("url", "")})
+            store.add(job.source_url, title, "draft", post.get("id", ""))
+            self._json(200, {
+                "status": "draft",
+                "title": post.get("title", title),
+                "url": post.get("url", ""),
+                "labels": post.get("labels", labels),
+                "search_description": description,
+                "search_description_requires_manual_entry": True,
+            })
 
         def _delete_history(self, data: dict):
             url = str(data.get("url") or "").strip()

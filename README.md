@@ -52,6 +52,12 @@ on loopback only; it does not automatically publish posts. Source pages are fetc
 robots.txt and SSRF protections as the CLI.
 The history panel can remove individual entries or clear local history; these actions never delete
 Blogger posts. Clearing history allows previously processed source URLs to be imported again.
+New Blogger posts receive labels for configured labels other than the generic `Jobs` label,
+use a post title in the `Position - Company` format, and receive company, job title, and inferred
+Government Jobs / Private Jobs category labels. JobBridge also generates a search description containing
+the category, title, and company. Blogger API v3 does not expose a per-post Search description
+field, so after saving a draft, copy the generated text from the web interface into
+**Post settings → Search description** in Blogger. The CLI prints the same text for manual entry.
 
 ## How it works
 `sources → discover links (RSS/Atom, else heuristic page links) → skip already-seen (SQLite) →

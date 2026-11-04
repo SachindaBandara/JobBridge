@@ -66,6 +66,27 @@ function appendFact(container, label, value) {
   container.append(fact);
 }
 
+function makeSeoMetadata(labels, description, saved = false, title = "") {
+  const seo = node("div", "seo-meta");
+  seo.append(
+    node("strong", "", saved ? "Blogger post metadata" : "Metadata to be saved"),
+    node("p", "", `${saved ? "Post title" : "Blogger title"}: ${title || "Unavailable"}`),
+    node("p", "", `Labels${saved ? " saved" : ""}: ${(labels || []).join(", ") || "None"}`),
+    node("p", "", `Search description (paste into Blogger Post settings): ${description || "Unavailable"}`)
+  );
+  const copyDescription = node("button", "seo-copy", "Copy search description");
+  copyDescription.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(description || "");
+      copyDescription.textContent = "Copied";
+    } catch {
+      reportError("Could not copy the search description. Select and copy the text above manually.");
+    }
+  });
+  seo.append(copyDescription);
+  return seo;
+}
+
 function renderJob(job) {
   const card = node("article", "job-card");
   const top = node("div", "job-card-top");
@@ -83,6 +104,7 @@ function renderJob(job) {
   appendFact(facts, "Posted", job.date_posted);
   appendFact(facts, "Apply by", job.valid_through);
   if (facts.childElementCount) card.append(facts);
+  card.append(makeSeoMetadata(job.suggested_labels, job.search_description, false, job.blogger_title));
 
   if (job.description) {
     const description = node("div", "job-description");
@@ -157,6 +179,9 @@ function renderJob(job) {
         status.textContent = "draft";
         status.classList.add("done");
         job.status = "already processed";
+        card.querySelector(".seo-meta").replaceWith(
+          makeSeoMetadata(result.labels, result.search_description, true, result.title)
+        );
         const draftUrl = safeExternalUrl(result.url);
         if (draftUrl) {
           const draftLink = node("a", "", "View draft ↗");

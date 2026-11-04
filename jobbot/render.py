@@ -34,11 +34,10 @@ def _employment_type(value: str) -> str:
 def render_post(job, excerpt_chars: int = 600) -> str:
     e = html.escape
     post_facts = (
-        ("Posted", _date_only(job.date_posted)),
-        ("Job position", job.title),
-        ("Employment type", _employment_type(job.employment_type)),
+        ("Posted", _date_only(job.date_posted) or "Not specified"),
+        ("Job position", job.title or "Not specified"),
+        ("Employment type", _employment_type(job.employment_type) or "Not specified"),
     )
-    post_facts = tuple((label, value) for label, value in post_facts if value)
     cell_width = f"{100 / len(post_facts):.2f}%" if post_facts else ""
     date_cells = "".join(
         f'<td style="width:{cell_width};padding:12px 16px;vertical-align:top">'

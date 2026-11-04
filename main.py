@@ -54,6 +54,10 @@ def main():
     from jobbot.pipeline import run
     for res in run(cfg, sources, publish=a.publish, dry_run=a.dry_run):
         print(f"[{res['status']}] {res['title']} -> {res['url']}")
+        if res.get("labels"):
+            print(f"Labels: {', '.join(res['labels'])}")
+        if res.get("search_description"):
+            print(f"Search description (paste into Blogger Post settings): {res['search_description']}")
         if a.dry_run:
             print(res["html"], "\n" + "-" * 60)
 

@@ -74,6 +74,11 @@ h2{font:700 21px Arial,sans-serif;letter-spacing:-.55px;margin-bottom:6px}
 .asset-item a{color:#348164;text-decoration:none}
 .asset-item a:hover{text-decoration:underline}
 .generated-preview{display:block;max-width:100%;max-height:180px;border-radius:7px;margin-top:8px;object-fit:contain;background:#f0f3f0}
+.seo-meta{margin:0 22px 16px;padding:13px 15px;border:1px solid #dcebe1;border-radius:8px;background:#f5faf6;color:#526159;font-size:11px;line-height:1.55}
+.seo-meta strong{display:block;margin-bottom:5px;color:#33443a;font-size:12px}
+.seo-meta p{margin:3px 0;overflow-wrap:anywhere}
+.seo-copy{margin-top:7px;border:1px solid #d6e5db;border-radius:6px;padding:7px 9px;background:white;color:#28674e;font-size:10px}
+.seo-copy:hover{border-color:#b9d6c5}
 .card-actions{display:flex;align-items:center;gap:8px;border-top:1px solid #eff2ef;padding:13px 22px}
 .card-actions button,.card-actions a{border:1px solid #e1e7e2;background:white;border-radius:6px;color:#55645c;text-decoration:none;padding:8px 10px;font-size:10px}
 .card-actions button:hover,.card-actions a:hover{border-color:#b9d6c5;color:var(--green)}

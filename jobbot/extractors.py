@@ -15,6 +15,7 @@ class Job:
     title: str
     source_url: str
     company: str = ""
+    organization_type: str = ""
     location: str = ""
     employment_type: str = ""
     date_posted: str = ""
@@ -259,6 +260,7 @@ def parse_job(html: str, url: str) -> Job:
                     title=_s(node.get("title")) or (soup.title.get_text(strip=True) if soup.title else "Job opening"),
                     source_url=url,
                     company=_s(organization),
+                    organization_type=_s(organization.get("@type")) if isinstance(organization, dict) else "",
                     location=_location(node.get("jobLocation")) or _s(node.get("applicantLocationRequirements")),
                     employment_type=_s(node.get("employmentType")),
                     date_posted=_s(node.get("datePosted")),

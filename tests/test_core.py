@@ -8,6 +8,7 @@ import pytest
 from jobbot.security import validate_url, sanitize_html, UnsafeURL
 from jobbot.extractors import parse_job, links_from_listing, links_from_feed, is_feed
 from jobbot.render import render_post
+from jobbot.post_metadata import job_category, post_labels, post_title, search_description
 from jobbot.whatsapp import extract_links
 from jobbot.storage import Store, normalize
 
@@ -106,7 +107,7 @@ def test_web_job_round_trip_preserves_full_sanitized_description():
     from jobbot.web import _job_data, _job_from_data
     job = parse_job(
         """<script type="application/ld+json">
-        {"@type":"JobPosting","title":"Developer","hiringOrganization":{"name":"Acme","logo":"/acme.png"},
+        {"@type":"JobPosting","title":"Developer","hiringOrganization":{"@type":"GovernmentOrganization","name":"Acme","logo":"/acme.png"},
          "description":"<p>First detail.</p><ul><li>Second detail.</li></ul><a href='javascript:alert(1)'>Apply</a>"}
         </script>""",
         "https://jobs.test/job/1",
@@ -117,6 +118,10 @@ def test_web_job_round_trip_preserves_full_sanitized_description():
     assert "First detail." in post and "<li>Second detail.</li>" in post
     assert "javascript:" not in post
     assert restored.company_logo_url == "https://jobs.test/acme.png"
+    assert restored.organization_type == "GovernmentOrganization"
+    assert serialized["suggested_labels"][-1] == "Government Jobs"
+    assert serialized["blogger_title"] == "Developer - Acme"
+    assert serialized["search_description"] == "Government Jobs: Developer at Acme"
 
 
 def test_blogger_template_preserves_bold_description_text_through_web_round_trip():
@@ -134,6 +139,106 @@ def test_blogger_template_preserves_bold_description_text_through_web_round_trip
     assert "<strong>Five years experience</strong>" in post
     assert "<strong>Encoded requirement</strong>" in post
     assert "font-weight:700" not in post
+
+
+def test_job_blogger_metadata_includes_company_position_and_job_category():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Data Analyst",
+        source_url="https://careers.example.com/analyst",
+        company="Ministry of Health",
+        organization_type="GovernmentOrganization",
+    )
+    labels = post_labels(job, ["Jobs", "Public Roles"])
+    description = search_description(job)
+    assert labels == ["Public Roles", "Ministry of Health", "Data Analyst", "Government Jobs"]
+    assert description == "Government Jobs: Data Analyst at Ministry of Health"
+    assert job_category(job) == "Government Jobs"
+
+
+def test_post_template_always_shows_all_three_information_fields():
+    from jobbot.extractors import Job
+
+    job = Job(title="Office Assistant", source_url="https://jobs.example.com/office")
+    post = render_post(job)
+    assert ">Posted</span>" in post and ">Not specified</strong>" in post
+    assert ">Job position</span>" in post and ">Office Assistant</strong>" in post
+    assert ">Employment type</span>" in post
+    assert post.count(">Not specified</strong>") == 2
+
+
+def test_job_blogger_metadata_defaults_to_private_for_unmarked_employers():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Software Engineer",
+        source_url="https://jobs.example.com/engineer",
+        company="Acme Ltd",
+    )
+    assert job_category(job) == "Private Jobs"
+    assert "Private Jobs" in post_labels(job)
+    assert search_description(job) == "Private Jobs: Software Engineer at Acme Ltd"
+
+
+def test_blogger_title_uses_position_and_company():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="  Senior Engineer ",
+        source_url="https://jobs.example.com/engineer",
+        company=" Acme Ltd ",
+    )
+    assert post_title(job) == "Senior Engineer - Acme Ltd"
+
+
+def test_blogger_title_falls_back_to_available_value_and_respects_blogger_limit():
+    from jobbot.extractors import Job
+
+    without_company = Job(title="Data Analyst", source_url="https://jobs.example.com/analyst")
+    without_position = Job(title="", source_url="https://jobs.example.com/analyst", company="Acme Ltd")
+    long_title = Job(title="P" * 190, source_url="https://jobs.example.com/analyst", company="C" * 30)
+    assert post_title(without_company) == "Data Analyst"
+    assert post_title(without_position) == "Acme Ltd"
+    assert len(post_title(long_title)) == 200
+
+
+def test_post_labels_remove_generic_jobs_label_when_specific_labels_exist():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Software Engineer",
+        source_url="https://jobs.example.com/engineer",
+        company="Acme Ltd",
+    )
+    labels = post_labels(job, ["Jobs", "Engineering"])
+    assert labels == ["Engineering", "Acme Ltd", "Software Engineer", "Private Jobs"]
+    assert all(label.casefold() != "jobs" for label in labels)
+
+
+def test_post_labels_remove_case_insensitive_generic_jobs_label():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Data Analyst",
+        source_url="https://jobs.example.com/analyst",
+        company="Acme",
+    )
+    assert all(label.casefold() != "jobs" for label in post_labels(job, ["jobs"]))
+
+
+def test_search_description_is_limited_and_includes_job_fields():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Senior " + "Platform Engineer " * 8,
+        source_url="https://jobs.example.com/engineer",
+        company="A Very Large " + "Technology Company " * 8,
+    )
+    description = search_description(job)
+    assert len(description) <= 150
+    assert description.startswith("Private Jobs:")
+    assert " at " in description
 
 
 def test_listing_and_feed():
@@ -217,7 +322,7 @@ def test_web_scan_fetches_discovered_jobs_in_order_and_keeps_full_descriptions(m
         "content": {"use_ai_summary": False},
         "env": {"gemini_key": ""},
         "fetch": {},
-        "blogger": {},
+        "blogger": {"labels": ["Jobs"]},
     }
     server = ThreadingHTTPServer(("127.0.0.1", 0), web.create_handler(cfg))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -235,10 +340,121 @@ def test_web_scan_fetches_discovered_jobs_in_order_and_keeps_full_descriptions(m
         assert fetcher.requested == urls
         assert [job["title"] for job in result["jobs"]] == ["Newest", "Next"]
         assert all(len(job["description"]) > 6000 for job in result["jobs"])
+        assert all("Jobs" not in job["suggested_labels"] for job in result["jobs"])
     finally:
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_web_new_post_publishes_template_and_job_labels(monkeypatch, tmp_path):
+    from jobbot import blogger, web
+
+    captured = {}
+
+    class FakeBlogger:
+        def __init__(self, cfg):
+            pass
+
+        def insert(self, title, content, labels, is_draft=True):
+            captured.update(title=title, content=content, labels=labels, is_draft=is_draft)
+            return {"id": "post-123", "url": "https://blog.example/post", "labels": labels}
+
+    monkeypatch.setattr(blogger, "Blogger", FakeBlogger)
+    monkeypatch.setattr(web, "validate_url", lambda url, allowed_domains=None: url)
+    monkeypatch.setattr(web, "Store", lambda: Store(str(tmp_path / "publish-history.db")))
+    cfg = {
+        "content": {"excerpt_chars": 600},
+        "fetch": {"allowed_domains": []},
+        "blogger": {"labels": ["Jobs"]},
+    }
+    server = ThreadingHTTPServer(("127.0.0.1", 0), web.create_handler(cfg))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    job = {
+        "title": "Public Health Inspector",
+        "source_url": "https://jobs.example.com/inspector",
+        "company": "Ministry of Health",
+        "organization_type": "GovernmentOrganization",
+        "employment_type": "FULL_TIME",
+        "date_posted": "2026-11-04",
+        "valid_through": "2027-02-02",
+        "description_html": "<p>Public service role.</p>",
+    }
+    try:
+        request = Request(
+            base_url + "/api/publish",
+            data=json.dumps({"job": job}).encode(),
+            headers={"Content-Type": "application/json", "Origin": base_url},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            result = json.loads(response.read())
+        assert captured["is_draft"] is True
+        assert captured["title"] == "Public Health Inspector - Ministry of Health"
+        assert captured["labels"] == [
+            "Ministry of Health", "Public Health Inspector", "Government Jobs"
+        ]
+        assert ">Posted</span>" in captured["content"]
+        assert ">2026-11-04</strong>" in captured["content"]
+        assert ">Job position</span>" in captured["content"]
+        assert ">Public Health Inspector</strong>" in captured["content"]
+        assert ">Employment type</span>" in captured["content"]
+        assert ">Full Time</strong>" in captured["content"]
+        assert "Apply before" not in captured["content"]
+        assert result["labels"] == captured["labels"]
+        assert result["title"] == captured["title"]
+        assert result["search_description"] == "Government Jobs: Public Health Inspector at Ministry of Health"
+        assert result["search_description_requires_manual_entry"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_pipeline_sends_automatic_job_labels_to_blogger(monkeypatch, tmp_path):
+    from jobbot import blogger, pipeline
+
+    captured = {}
+    page = """<script type="application/ld+json">
+    {"@type":"JobPosting","title":"Systems Analyst","employmentType":"FULL_TIME",
+     "hiringOrganization":{"@type":"GovernmentOrganization","name":"National Water Board"},
+     "description":"<p>Government role.</p>"}
+    </script>"""
+
+    class FakeFetcher:
+        def __init__(self, cfg):
+            pass
+
+        def get(self, url):
+            return url, page
+
+    class FakeBlogger:
+        def __init__(self, cfg):
+            pass
+
+        def insert(self, title, content, labels, is_draft=True):
+            captured.update(title=title, labels=labels, is_draft=is_draft)
+            return {"id": "post-456", "url": "https://blog.example/analyst"}
+
+    monkeypatch.setattr(pipeline, "Fetcher", FakeFetcher)
+    monkeypatch.setattr(blogger, "Blogger", FakeBlogger)
+    monkeypatch.setattr(pipeline, "Store", lambda: Store(str(tmp_path / "pipeline-history.db")))
+    cfg = {
+        "blogger": {"labels": ["Jobs", "Sri Lanka Jobs"], "publish_immediately": False},
+        "fetch": {},
+        "content": {"use_ai_summary": False, "excerpt_chars": 600},
+    }
+
+    result = pipeline.run(cfg, [{"type": "url", "url": "https://jobs.example/analyst"}])
+    assert captured == {
+        "title": "Systems Analyst - National Water Board",
+        "labels": ["Sri Lanka Jobs", "National Water Board", "Systems Analyst", "Government Jobs"],
+        "is_draft": True,
+    }
+    assert result[0]["labels"] == captured["labels"]
+    assert result[0]["status"] == "draft"
 
 
 def test_job_assets_are_extracted_as_absolute_http_urls():
@@ -355,6 +571,35 @@ def test_blogger_update_uses_existing_resource_metadata():
     result = blogger.update(existing_post)
     assert result["status"] == "DRAFT"
     assert calls == {"blogId": "blog-1", "postId": "post-1", "body": existing_post}
+
+
+def test_blogger_insert_sends_job_labels_as_blogger_labels():
+    from jobbot.blogger import Blogger
+
+    calls = {}
+
+    class Request:
+        def execute(self):
+            return {"id": "post-1", "labels": calls["body"]["labels"]}
+
+    class Posts:
+        def insert(self, **kwargs):
+            calls.update(kwargs)
+            return Request()
+
+    class Service:
+        def posts(self):
+            return Posts()
+
+    blogger = object.__new__(Blogger)
+    blogger.blog_id = "blog-1"
+    blogger.svc = Service()
+    labels = ["Acme Ltd", "Engineer", "Private Jobs"]
+    result = blogger.insert("Engineer", "<p>Body</p>", labels)
+    assert calls["blogId"] == "blog-1"
+    assert calls["isDraft"] is True
+    assert calls["body"]["labels"] == labels
+    assert result["labels"] == labels
 
 
 def test_gemini_summary_uses_header_and_parses(monkeypatch):

@@ -4,6 +4,7 @@ from . import whatsapp
 from .ai import summarize
 from .extractors import discover_feed_url, is_feed, links_from_feed, links_from_listing, parse_job
 from .fetcher import Fetcher, FetchError
+from .post_metadata import post_labels, post_title, search_description
 from .render import render_post
 from .storage import Store
 
@@ -57,14 +58,32 @@ def run(cfg: dict, sources: list[dict], publish: bool = False, dry_run: bool = F
                 if cfg["content"]["use_ai_summary"]:
                     job.summary = summarize(job, cfg)
                 content = render_post(job, cfg["content"]["excerpt_chars"])
+                title = post_title(job)
+                labels = post_labels(job, cfg["blogger"]["labels"])
+                description = search_description(job)
                 if dry_run:
-                    results.append({"title": job.title, "url": final, "status": "dry-run", "html": content})
+                    results.append({
+                        "title": title,
+                        "url": final,
+                        "status": "dry-run",
+                        "html": content,
+                        "labels": labels,
+                        "search_description": description,
+                        "search_description_requires_manual_entry": True,
+                    })
                     continue
-                post = blogger.insert(job.title, content, cfg["blogger"]["labels"], is_draft=not go_live)
+                post = blogger.insert(title, content, labels, is_draft=not go_live)
                 status = "published" if go_live else "draft"
                 store.add(link, job.title, status, post.get("id", ""))
-                results.append({"title": job.title, "url": post.get("url", ""), "status": status})
-                log.info("%s: %s", status, job.title)
+                results.append({
+                    "title": title,
+                    "url": post.get("url", ""),
+                    "status": status,
+                    "labels": labels,
+                    "search_description": description,
+                    "search_description_requires_manual_entry": True,
+                })
+                log.info("%s: %s", status, title)
             except Exception as e:  # keep going on per-item failures
                 log.error("Item failed %s: %s", link, e)
     return results

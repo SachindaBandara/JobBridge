@@ -31,3 +31,13 @@ class Store:
 
     def history(self, limit=50):
         return self.db.execute("SELECT created_at,status,title,url FROM posts ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+
+    def delete(self, url: str) -> int:
+        cursor = self.db.execute("DELETE FROM posts WHERE h=?", (self.key(url),))
+        self.db.commit()
+        return cursor.rowcount
+
+    def clear_history(self) -> int:
+        cursor = self.db.execute("DELETE FROM posts")
+        self.db.commit()
+        return cursor.rowcount

@@ -1,4 +1,10 @@
+import json
+import threading
+from http.server import ThreadingHTTPServer
+from urllib.request import Request, urlopen
+
 import pytest
+
 from jobbot.security import validate_url, sanitize_html, UnsafeURL
 from jobbot.extractors import parse_job, links_from_listing, links_from_feed, is_feed
 from jobbot.render import render_post
@@ -50,8 +56,8 @@ def test_job_logo_dates_and_full_description_render_without_metadata_or_source()
     assert job.advertisement_image_url == "https://itpro.lk/job_images/sales-ad.png"
     assert post.index("<img") < post.index("Posted:")
     assert 'src="https://itpro.lk/images/wad-logo.png"' in post
-    assert 'src="https://itpro.lk/job_images/sales-ad.png"' in post
-    assert post.index('alt="WAD International logo"') < post.index('alt="Job advertisement"')
+    assert 'src="https://itpro.lk/job_images/sales-ad.png"' not in post
+    assert 'alt="Job advertisement"' not in post
     assert "Posted:</strong> 2026-11-04" in post
     assert "Apply before:</strong> 2027-02-02" in post
     assert "First paragraph with the complete role details." in post
@@ -83,6 +89,104 @@ def test_listing_and_feed():
     assert links_from_listing(page, "https://a.test/", 5) == ["https://a.test/jobs/senior-engineer-123"]
     feed = '<?xml version="1.0"?><rss version="2.0"><channel><item><title>t</title><link>https://a.test/j/1</link></item></channel></rss>'
     assert is_feed(feed) and links_from_feed(feed, 5) == ["https://a.test/j/1"]
+
+
+def test_listing_links_are_ordered_by_posted_date_not_keyword_score():
+    page = """
+    <article class="job-listing"><time datetime="2026-10-01">Oct 1</time>
+      <a href="/jobs/new-role">New role with a long title</a></article>
+    <article class="job-listing"><time datetime="2026-11-04">Nov 4</time>
+      <a href="/jobs/opening/job-123">Older keyword-heavy job opening</a></article>
+    """
+    assert links_from_listing(page, "https://jobs.test/jobs", 2) == [
+        "https://jobs.test/jobs/opening/job-123",
+        "https://jobs.test/jobs/new-role",
+    ]
+
+
+def test_listing_links_keep_page_order_when_dates_are_missing():
+    page = """
+    <a href="/jobs/new-role">Newest role on page</a>
+    <a href="/jobs/older-role">Older role on page</a>
+    """
+    assert links_from_listing(page, "https://jobs.test/jobs", 2) == [
+        "https://jobs.test/jobs/new-role",
+        "https://jobs.test/jobs/older-role",
+    ]
+
+
+def test_feed_links_are_sorted_by_published_date():
+    feed = """<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>New role</title><link>https://jobs.test/new</link><pubDate>Wed, 04 Nov 2026 10:00:00 +0000</pubDate></item>
+      <item><title>Old role</title><link>https://jobs.test/old</link><pubDate>Tue, 03 Nov 2026 10:00:00 +0000</pubDate></item>
+    </channel></rss>"""
+    assert links_from_feed(feed, 2) == ["https://jobs.test/new", "https://jobs.test/old"]
+
+
+def test_fallback_job_description_keeps_full_formatted_article():
+    long_details = "Complete requirement. " * 400
+    page = f"""<html><body>
+      <nav>Navigation text must not be copied.</nav>
+      <article><h1>Senior Engineer</h1><div class="job-description">
+        <p>{long_details}</p><ul><li>Five years of experience</li></ul>
+      </div><footer>Site footer must not be copied.</footer></article>
+    </body></html>"""
+    job = parse_job(page, "https://jobs.test/job/1")
+    assert len(job.description_html) > 6000
+    assert "Five years of experience" in job.description_html
+    assert "Navigation text" not in job.description_html
+    assert "Site footer" not in job.description_html
+
+
+def test_web_scan_fetches_discovered_jobs_in_order_and_keeps_full_descriptions(monkeypatch, tmp_path):
+    from jobbot import web
+
+    urls = ["https://jobs.test/newest", "https://jobs.test/next"]
+    description = "Complete job responsibility. " * 400
+    pages = {
+        urls[0]: f'<script type="application/ld+json">{{"@type":"JobPosting","title":"Newest","description":"<p>{description}</p>"}}</script>',
+        urls[1]: f'<script type="application/ld+json">{{"@type":"JobPosting","title":"Next","description":"<p>{description}</p>"}}</script>',
+    }
+
+    class FakeFetcher:
+        def __init__(self):
+            self.requested = []
+
+        def get(self, url):
+            self.requested.append(url)
+            return url, pages[url]
+
+    fetcher = FakeFetcher()
+    monkeypatch.setattr(web, "Fetcher", lambda cfg: fetcher)
+    monkeypatch.setattr(web, "collect_links", lambda source, client: urls)
+    database_path = str(tmp_path / "scan-history.db")
+    monkeypatch.setattr(web, "Store", lambda: Store(database_path))
+    cfg = {
+        "content": {"use_ai_summary": False},
+        "env": {"gemini_key": ""},
+        "fetch": {},
+        "blogger": {},
+    }
+    server = ThreadingHTTPServer(("127.0.0.1", 0), web.create_handler(cfg))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        request = Request(
+            base_url + "/api/scan",
+            data=json.dumps({"url": "https://jobs.test/listing", "max_items": "2"}).encode(),
+            headers={"Content-Type": "application/json", "Origin": base_url},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            result = json.loads(response.read())
+        assert fetcher.requested == urls
+        assert [job["title"] for job in result["jobs"]] == ["Newest", "Next"]
+        assert all(len(job["description"]) > 6000 for job in result["jobs"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def test_job_assets_are_extracted_as_absolute_http_urls():
@@ -118,6 +222,60 @@ def test_dedupe(tmp_path):
     s = Store(str(tmp_path / "t.db"))
     s.add("https://A.test/x/", "t", "draft")
     assert s.seen("https://a.test/x") and normalize("https://A.test/x/") == "https://a.test/x"
+
+
+def test_history_delete_and_clear_only_remove_local_records(tmp_path):
+    store = Store(str(tmp_path / "history.db"))
+    store.add("https://jobs.test/one", "One", "draft", "blogger-1")
+    store.add("https://jobs.test/two", "Two", "published", "blogger-2")
+
+    assert store.delete("https://JOBS.test/one/") == 1
+    assert not store.seen("https://jobs.test/one")
+    assert store.seen("https://jobs.test/two")
+    assert store.clear_history() == 1
+    assert store.history() == []
+    assert store.clear_history() == 0
+
+
+def test_history_delete_and_clear_api_affect_local_store_only(monkeypatch, tmp_path):
+    from jobbot import web
+
+    database_path = str(tmp_path / "api-history.db")
+    store = Store(database_path)
+    store.add("https://jobs.test/one", "One", "draft", "blogger-1")
+    store.add("https://jobs.test/two", "Two", "draft", "blogger-2")
+    monkeypatch.setattr(web, "Store", lambda: Store(database_path))
+    cfg = {"content": {}, "env": {}, "fetch": {}, "blogger": {}}
+    server = ThreadingHTTPServer(("127.0.0.1", 0), web.create_handler(cfg))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        delete_request = Request(
+            base_url + "/api/history/delete",
+            data=json.dumps({"url": "https://jobs.test/one"}).encode(),
+            headers={"Content-Type": "application/json", "Origin": base_url},
+            method="POST",
+        )
+        with urlopen(delete_request) as response:
+            deleted = json.loads(response.read())
+        assert deleted == {"deleted": 1, "blogger_posts_affected": 0}
+        assert Store(database_path).seen("https://jobs.test/two")
+
+        clear_request = Request(
+            base_url + "/api/history/clear",
+            data=b"{}",
+            headers={"Content-Type": "application/json", "Origin": base_url},
+            method="POST",
+        )
+        with urlopen(clear_request) as response:
+            cleared = json.loads(response.read())
+        assert cleared == {"deleted": 1, "blogger_posts_affected": 0}
+        assert Store(database_path).history() == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def test_blogger_update_uses_existing_resource_metadata():

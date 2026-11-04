@@ -235,7 +235,8 @@ async function showHistory() {
     const response = await fetch("/api/history");
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Could not load history.");
-    if (!result.history.length) historyList.append(node("div", "empty-state", "No Blogger drafts yet."));
+    document.querySelector("#history-clear").disabled = result.history.length === 0;
+    if (!result.history.length) historyList.append(node("div", "empty-state", "No local history yet."));
     result.history.forEach(item => {
       const row = node("div", "history-item");
       const details = node("div");
@@ -250,7 +251,28 @@ async function showHistory() {
       } else {
         details.append(node("span", "", "Source URL unavailable"));
       }
-      row.append(details, node("time", "", new Date(item.created_at * 1000).toLocaleDateString()));
+      const actions = node("div", "history-item-actions");
+      actions.append(node("time", "", new Date(item.created_at * 1000).toLocaleDateString()));
+      const deleteButton = node("button", "delete-history-button", "Delete");
+      deleteButton.type = "button";
+      deleteButton.setAttribute("aria-label", `Delete local history for ${item.title}`);
+      deleteButton.addEventListener("click", async () => {
+        if (!window.confirm(`Delete "${item.title}" from local history? The Blogger post will not be deleted.`)) return;
+        deleteButton.disabled = true;
+        try {
+          await request("/api/history/delete", {url: item.url});
+          row.remove();
+          if (!historyList.querySelector(".history-item")) {
+            historyList.replaceChildren(node("div", "empty-state", "No local history yet."));
+            document.querySelector("#history-clear").disabled = true;
+          }
+        } catch (error) {
+          deleteButton.disabled = false;
+          historyList.append(node("div", "alert", error.message));
+        }
+      });
+      actions.append(deleteButton);
+      row.append(details, actions);
       historyList.append(row);
     });
   } catch (error) {
@@ -261,3 +283,15 @@ async function showHistory() {
 
 document.querySelector("#history-toggle").addEventListener("click", showHistory);
 document.querySelector("#history-close").addEventListener("click", () => { historyPanel.hidden = true; });
+document.querySelector("#history-clear").addEventListener("click", async event => {
+  const button = event.currentTarget;
+  if (!window.confirm("Clear all local history? Blogger posts will not be deleted, and these jobs may be imported again.")) return;
+  button.disabled = true;
+  try {
+    await request("/api/history/clear", {});
+    historyList.replaceChildren(node("div", "empty-state", "No local history yet."));
+  } catch (error) {
+    historyList.append(node("div", "alert", error.message));
+    button.disabled = false;
+  }
+});

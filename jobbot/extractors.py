@@ -3,6 +3,8 @@ from html import escape
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlparse
 import feedparser
 from bs4 import BeautifulSoup
@@ -46,13 +48,64 @@ def discover_feed_url(html: str, base_url: str) -> str | None:
 
 def links_from_feed(text: str, max_items: int) -> list[str]:
     d = feedparser.parse(text)
-    return [e.link for e in d.entries if getattr(e, "link", None)][:max_items]
+    entries = [
+        (entry, index)
+        for index, entry in enumerate(d.entries)
+        if getattr(entry, "link", None)
+    ]
+    if any(entry.get("published_parsed") or entry.get("updated_parsed") for entry, _ in entries):
+        entries.sort(
+            key=lambda item: (
+                item[0].get("published_parsed") or item[0].get("updated_parsed") or (1, 1, 1, 0, 0, 0, 0, 0, 0),
+                -item[1],
+            ),
+            reverse=True,
+        )
+    return [entry.link for entry, _ in entries[:max_items]]
+
+
+def _published_date(node) -> datetime | None:
+    value = ""
+    if getattr(node, "name", None) == "time":
+        value = node.get("datetime") or node.get_text(" ", strip=True)
+    if not value:
+        date_node = node.select_one(
+            'time[datetime], [itemprop="datePublished"], [itemprop="dateCreated"], '
+            '[class*="date"], [class*="time"], [datetime], [data-date]'
+        )
+        if date_node:
+            value = (
+                date_node.get("datetime")
+                or date_node.get("content")
+                or date_node.get("data-date")
+                or date_node.get_text(" ", strip=True)
+            )
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(str(value).strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _listing_date(anchor) -> datetime | None:
+    for parent in [anchor, *list(anchor.parents)[:5]]:
+        published = _published_date(parent)
+        if published:
+            return published
+    return None
 
 
 def links_from_listing(html: str, base_url: str, max_items: int) -> list[str]:
     soup = BeautifulSoup(html, "lxml")
     host = urlparse(base_url).netloc
-    scored, seen = [], set()
+    candidates, seen = [], set()
     for a in soup.find_all("a", href=True):
         href = urljoin(base_url, a["href"]).split("#")[0]
         p = urlparse(href)
@@ -61,11 +114,20 @@ def links_from_listing(html: str, base_url: str, max_items: int) -> list[str]:
             continue
         if SKIP_HINTS.search(href) or len(text) < 8 or len(p.path.strip("/")) < 3:
             continue
+        card = a.find_parent(["article", "li"])
+        if not (JOB_HINTS.search(href) or JOB_HINTS.search(text)):
+            card_hint = " ".join((card.get("class", []) if card else []) + ([card.get("id", "")] if card else []))
+            if not card or not re.search(r"job|post|article|listing|vacan|career", card_hint, re.I):
+                continue
         seen.add(href)
-        score = (2 if JOB_HINTS.search(href) else 0) + (1 if JOB_HINTS.search(text) else 0)
-        scored.append((score, len(scored), href))
-    scored.sort(key=lambda t: (-t[0], t[1]))
-    return [h for _, _, h in scored[:max_items]]
+        candidates.append((_listing_date(a), len(candidates), href))
+
+    if any(published for published, _, _ in candidates):
+        candidates.sort(
+            key=lambda item: (item[0] is not None, item[0] or datetime.min.replace(tzinfo=timezone.utc), -item[1]),
+            reverse=True,
+        )
+    return [href for _, _, href in candidates[:max_items]]
 
 
 def _flatten_ld(node):
@@ -217,14 +279,17 @@ def parse_job(html: str, url: str) -> Job:
         return (m.get("content") or "").strip() if m else ""
 
     title = meta("og:title") or (soup.title.get_text(strip=True) if soup.title else "") or "Job opening"
-    container = soup.find("article") or soup.find("main") or soup.body or soup
-    paragraphs = [
-        item.get_text(" ", strip=True)
-        for item in container.find_all(["p", "li"])
-        if item.get_text(" ", strip=True)
-    ]
-    description = "".join(f"<p>{escape(paragraph)}</p>" for paragraph in paragraphs)
-    if not description:
+    container = (
+        soup.select_one('[itemprop="description"], .job-description, #job-description, .job-details')
+        or soup.find("article")
+        or soup.find("main")
+        or soup.body
+        or soup
+    )
+    for unwanted in container.find_all(["script", "style", "noscript", "iframe", "form", "button", "nav", "footer"]):
+        unwanted.decompose()
+    description = "".join(str(child) for child in container.contents).strip()
+    if not BeautifulSoup(description, "lxml").get_text(" ", strip=True):
         description = f"<p>{escape(meta('og:description'))}</p>"
     return Job(
         title=title,

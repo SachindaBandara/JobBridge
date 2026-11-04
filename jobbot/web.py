@@ -45,7 +45,7 @@ def _job_data(job: Job, status: str = "ready") -> dict:
         "date_posted": job.date_posted,
         "valid_through": job.valid_through,
         "salary": job.salary,
-        "description": description[:6000],
+        "description": description,
         "description_html": sanitize_html(job.description_html),
         "summary": job.summary,
         "company_logo_url": job.company_logo_url,
@@ -91,6 +91,7 @@ def create_handler(cfg: dict):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
@@ -165,6 +166,10 @@ def create_handler(cfg: dict):
                     self._generate_image(data)
                 elif path == "/api/publish":
                     self._publish(data)
+                elif path == "/api/history/delete":
+                    self._delete_history(data)
+                elif path == "/api/history/clear":
+                    self._clear_history()
                 else:
                     self._json(404, {"error": "Not found."})
             except APIError as e:
@@ -267,6 +272,17 @@ def create_handler(cfg: dict):
                 raise APIError(f"Blogger draft creation failed ({type(e).__name__}); check the application logs.", 502) from e
             store.add(job.source_url, job.title, "draft", post.get("id", ""))
             self._json(200, {"status": "draft", "url": post.get("url", "")})
+
+        def _delete_history(self, data: dict):
+            url = str(data.get("url") or "").strip()
+            if not url:
+                raise APIError("A history URL is required.")
+            deleted = Store().delete(url)
+            self._json(200, {"deleted": deleted, "blogger_posts_affected": 0})
+
+        def _clear_history(self):
+            deleted = Store().clear_history()
+            self._json(200, {"deleted": deleted, "blogger_posts_affected": 0})
 
         def log_message(self, fmt, *args):
             log.info("%s - %s", self.address_string(), fmt % args)

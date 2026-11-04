@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#f6f7f5">
   <link rel="icon" href="data:,">
   <title>JobBridge — Job intelligence</title>
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=history-2">
+  <script src="/static/app.js?v=history-2" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -62,8 +62,15 @@
     </section>
 
     <section id="history-panel" class="history-panel" hidden>
-      <div class="results-heading"><div><div class="section-kicker"><span>03</span> HISTORY</div><h2>Recent Blogger drafts</h2></div><button id="history-close" class="text-button" type="button">Close <span>×</span></button></div>
+      <div class="results-heading">
+        <div><div class="section-kicker"><span>03</span> HISTORY</div><h2>Recent Blogger drafts</h2></div>
+        <div class="history-actions">
+          <button id="history-clear" class="text-button danger-button" type="button">Clear history</button>
+          <button id="history-close" class="text-button" type="button">Close <span>×</span></button>
+        </div>
+      </div>
       <div id="history-list" class="history-list"></div>
+      <p class="history-note">Deleting history only removes local records. Blogger posts are not deleted.</p>
     </section>
 
     <footer><span>JOBBRIDGE <span class="brand-period">●</span> BUILT FOR A BETTER SEARCH</span><span>Always verify role details with the employer.</span></footer>

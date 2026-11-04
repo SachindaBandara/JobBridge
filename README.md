@@ -44,18 +44,21 @@ The default summary model is `gemini-3.5-flash-lite`. Image generation uses Gemi
 
 ## Local web interface
 Run `python main.py web` and open `http://127.0.0.1:8000`. Enter a public listing/feed URL to inspect jobs
-individually, including extracted page links, image URLs, and available role details. You can request a
+individually. Feed entries are ordered by publication date; listing pages use their publication dates
+when available and otherwise preserve page order. Each discovered job URL is fetched and parsed one by
+one, with the full available description and details. You can request a
 Gemini summary or generated illustration for a job, and save it as a Blogger draft. The interface listens
 on loopback only; it does not automatically publish posts. Source pages are fetched with the same
 robots.txt and SSRF protections as the CLI.
+The history panel can remove individual entries or clear local history; these actions never delete
+Blogger posts. Clearing history allows previously processed source URLs to be imported again.
 
 ## How it works
 `sources → discover links (RSS/Atom, else heuristic page links) → skip already-seen (SQLite) →
 fetch job page → parse schema.org JobPosting JSON-LD (fallback: OpenGraph/text) → [optional Gemini
-summary] → embed available job-ad image → render full description → sanitize → Blogger API`.
+summary] → add company logo → render full description → sanitize → Blogger API`.
 
-The job-ad image is selected from JobPosting or Open Graph/Twitter metadata, or a clearly
-job-related image URL; unrelated site logos and tracking pixels are not used as the advertisement.
+Job-ad image URLs may be extracted for review, but are not embedded into Blogger posts.
 
 ## Security design
 | Risk | Mitigation |

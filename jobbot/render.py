@@ -26,10 +26,6 @@ def render_post(job, excerpt_chars: int = 600) -> str:
         logo_url = e(job.company_logo_url, quote=True)
         logo_alt = e(f"{job.company} logo" if job.company else "Company logo", quote=True)
         logo = f'<p><img src="{logo_url}" alt="{logo_alt}"></p>'
-    advertisement = ""
-    if job.advertisement_image_url:
-        image_url = e(job.advertisement_image_url, quote=True)
-        advertisement = f'<p><img src="{image_url}" alt="Job advertisement"></p>'
     summary = ""
     if job.summary:
         summary_text = job.summary[:excerpt_chars]
@@ -38,7 +34,6 @@ def render_post(job, excerpt_chars: int = 600) -> str:
         summary = f"<h2>Overview</h2><p>{e(summary_text)}</p>"
     body = (
         logo
-        + advertisement
         + (f"<ul>{facts}</ul>" if facts else "")
         + summary
         + sanitize_html(job.description_html)

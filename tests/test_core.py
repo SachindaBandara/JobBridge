@@ -76,6 +76,7 @@ def test_job_logo_dates_and_full_description_render_without_metadata_or_source()
     {"@type":"JobPosting","title":"Sales Executive","datePosted":"2026-11-04T09:49:36+05:30",
      "validThrough":"2027-02-02T23:59:59+05:30",
      "employmentType":"FULL_TIME",
+     "jobLocation":{"@type":"Place","address":{"addressLocality":"Colombo","addressCountry":"LK"}},
      "hiringOrganization":{"name":"WAD International","logo":{"@type":"ImageObject","url":"/images/wad-logo.png"}},
      "image":"/job_images/sales-ad.png",
      "description":"<p>First paragraph with the complete role details.</p><ul><li>Second detail.</li></ul>"}
@@ -90,6 +91,7 @@ def test_job_logo_dates_and_full_description_render_without_metadata_or_source()
     assert 'alt="Job advertisement"' not in post
     assert ">Posted</span>" in post and ">2026-11-04</strong>" in post
     assert ">Job position</span>" in post and ">Sales Executive</strong>" in post
+    assert ">Location</span>" in post and ">Colombo, LK</strong>" in post
     assert ">Employment type</span>" in post and ">Full Time</strong>" in post
     assert ">Company</span>" not in post
     assert "Apply before" not in post and "2027-02-02" not in post
@@ -98,7 +100,7 @@ def test_job_logo_dates_and_full_description_render_without_metadata_or_source()
     assert "background-color:#f3f8f4" in post
     assert "First paragraph with the complete role details." in post
     assert "<li>Second detail.</li>" in post
-    assert "Company:" not in post and "Location:" not in post and "Type:" not in post
+    assert "Company:" not in post and "Type:" not in post
     assert "View full details" not in post and "Source:" not in post
     assert "https://itpro.lk/job/1" not in post
 
@@ -164,8 +166,9 @@ def test_post_template_always_shows_all_three_information_fields():
     post = render_post(job)
     assert ">Posted</span>" in post and ">Not specified</strong>" in post
     assert ">Job position</span>" in post and ">Office Assistant</strong>" in post
+    assert ">Location</span>" in post
     assert ">Employment type</span>" in post
-    assert post.count(">Not specified</strong>") == 2
+    assert post.count(">Not specified</strong>") == 3
 
 
 def test_job_blogger_metadata_defaults_to_private_for_unmarked_employers():
@@ -225,6 +228,55 @@ def test_post_labels_remove_case_insensitive_generic_jobs_label():
         company="Acme",
     )
     assert all(label.casefold() != "jobs" for label in post_labels(job, ["jobs"]))
+
+
+@pytest.mark.parametrize(
+    "employment_type",
+    ["Intern", "INTERNSHIP", "Internships", "Intern - Full Time"],
+)
+def test_post_labels_add_internships_for_intern_employment_type(employment_type):
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Software Engineer Intern",
+        source_url="https://jobs.example.com/intern",
+        company="Acme Ltd",
+        employment_type=employment_type,
+    )
+    labels = post_labels(job, ["Jobs"])
+    assert labels == ["Acme Ltd", "Software Engineer Intern", "Private Jobs", "Internships"]
+    assert labels.count("Internships") == 1
+    assert all(label.casefold() != "jobs" for label in labels)
+
+
+def test_post_labels_do_not_add_internships_for_non_intern_employment_type():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Software Engineer",
+        source_url="https://jobs.example.com/engineer",
+        company="Acme Ltd",
+        employment_type="FULL_TIME",
+    )
+    assert "Internships" not in post_labels(job, ["Jobs"])
+
+
+def test_internship_label_survives_job_json_round_trip():
+    from jobbot.web import _job_data, _job_from_data
+
+    job = parse_job(
+        """<script type="application/ld+json">
+        {"@type":"JobPosting","title":"Marketing Intern","employmentType":"INTERN",
+         "hiringOrganization":{"name":"FAITE"},"description":"<p>Intern role</p>"}
+        </script>""",
+        "https://jobs.example.com/marketing-intern",
+    )
+    serialized = _job_data(job, configured_labels=["Jobs"])
+    restored = _job_from_data(serialized)
+    labels = post_labels(restored, ["Jobs"])
+    assert serialized["employment_type"] == "INTERN"
+    assert serialized["suggested_labels"] == ["FAITE", "Marketing Intern", "Private Jobs", "Internships"]
+    assert labels == serialized["suggested_labels"]
 
 
 def test_search_description_is_limited_and_includes_job_fields():

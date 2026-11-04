@@ -52,6 +52,8 @@ def post_labels(job, configured_labels: list[str] | None = None) -> list[str]:
         job.title,
         job_category(job),
     ]
+    if re.search(r"\bintern(?:ship)?s?\b", job.employment_type or "", re.I):
+        candidates.append("Internships")
     job_specific_labels = any(_label_text(value) for value in (job.company, job.title, job_category(job)))
     if job_specific_labels:
         candidates = [

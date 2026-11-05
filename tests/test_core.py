@@ -214,10 +214,169 @@ def test_jobgovdoc_sections_and_contacts_survive_publish_round_trip():
     assert "Phone</strong>" not in post and "Email</strong>" not in post
     assert "mailto:jobs@rusl.lk" not in post and "tel:+94112555555" not in post
     assert "At a glance" not in post and "This summary must not" not in post
-    assert post.index("Job description</h2>") < post.index("Job Details</h3>")
+    assert "Job Details</h3>" in post
     assert post.index("Job description</h2>") < post.index("Download Applications</h3>")
     assert 'style="margin-top:30px"' in post
     assert post.count("<h2") == 1 and post.count("<h3") == 2
+
+
+def test_gazette_government_job_uses_govdoc_design_and_only_vacancy_detail_rows():
+    from jobbot.web import _job_data, _job_from_data
+
+    page = """<html><head><title>Curator Vacancies - Gazette.lk</title></head><body>
+    <span class="cat-links"><a href="https://www.gazette.lk/government-jobs">Government Job Vacancies</a></span>
+    <article><header class="entry-header">
+      <h1 class="entry-title">Curator (Landscape) - University of Peradeniya Vacancies 2026</h1>
+      <div class="entry-meta"><time class="entry-date" datetime="2026-11-04T21:26:36+05:30">November 4, 2026</time></div>
+    </header><div class="entry-content"><div class="wprt-container">
+      <p>Closing Date: 2026-11-17</p>
+      <h3>Available Vacancies</h3><ul><li>Curator (Landscape)</li></ul>
+      <h3>Job Vacancy Details</h3><table>
+        <tr><td><strong>Organization</strong></td><td>University of Peradeniya</td></tr>
+        <tr><td><strong>English Advertisement Download</strong></td><td><a href="/dl/curator.pdf">Download PDF</a></td></tr>
+        <tr><td><strong>Application Instructions</strong></td><td><a href="/dl/instructions.pdf">Download PDF</a></td></tr>
+        <tr><td><strong>Application Link</strong></td><td><a href="https://apply.example.test/form">Click Here</a></td></tr>
+        <tr><td><strong>Source</strong></td><td>pdn.ac.lk</td></tr>
+        <tr><td><strong>Join Our WhatsApp Channel</strong></td><td><a href="https://whatsapp.com/channel/no">Click Here</a></td></tr>
+        <tr><td><strong>Follow Our Facebook Page</strong></td><td><a href="https://facebook.com/gazette">Click Here</a></td></tr>
+        <tr><td><strong>Application Fee</strong></td><td>No fee</td></tr>
+      </table>
+      <h3>Job Application Tools</h3><table><tr><td>Salary Calculator</td></tr></table>
+    </div></div></article></body></html>"""
+
+    job = parse_job(
+        page,
+        "https://www.gazette.lk/2026/11/curator-landscape-university-of-peradeniya.html",
+    )
+    serialized = _job_data(job, configured_labels=["Jobs"])
+    restored = _job_from_data(serialized)
+    restored.company_logo_url = "https://logos.example.test/university.png"
+    post = render_post(restored)
+
+    assert job.title == "Curator (Landscape) - University of Peradeniya Vacancies 2026"
+    assert job.company == "University of Peradeniya"
+    assert job.date_posted == "2026-11-04"
+    assert job.visible_closing_date == "2026-11-17"
+    assert job.government_job is True
+    assert job_category(job) == "Government Jobs"
+    assert serialized["suggested_labels"][-1] == "Government Jobs"
+    assert [item["label"] for item in restored.gazette_details] == [
+        "Organization",
+        "English Advertisement Download",
+        "Application Instructions",
+        "Application Link",
+        "Source",
+        "Application Fee",
+    ]
+    assert ">Closing date</span>" in post and ">2026-11-17</strong>" in post
+    assert "Government Job Vacancies" not in post
+    assert "Job description</h2>" in post
+    assert "<th" in post and "University of Peradeniya" in post
+    assert ">English Advertisement Download</th>" in post
+    assert ">Application Instructions</th>" in post
+    assert ">Application Link</th>" in post
+    assert "href=\"https://www.gazette.lk/dl/curator.pdf\"" in post
+    assert "href=\"https://www.gazette.lk/dl/instructions.pdf\"" in post
+    assert "href=\"https://apply.example.test/form\"" in post
+    assert "pdn.ac.lk" in post
+    assert ">Application Fee</th>" in post and ">No fee</td>" in post
+    assert "whatsapp.com" not in post
+    assert "facebook.com" not in post
+    assert "Join Our WhatsApp Channel" not in post
+    assert "Follow Our Facebook Page" not in post
+    assert "Salary Calculator" not in post
+    assert "Job Details</h3>" not in post
+    assert "Download Applications</h3>" in post
+    assert post.index("Job description</h2>") < post.index("Download Applications</h3>")
+    assert "logos.example.test" not in post
+
+
+def test_gazette_sinhala_advertisement_download_is_included_in_job_details():
+    page = """<html><body>
+    <span class="cat-links"><a href="https://www.gazette.lk/government-jobs">Government Job Vacancies</a></span>
+    <h1 class="entry-title">Technical Officer Vacancies</h1>
+    <div class="entry-meta"><time datetime="2026-11-04T10:00:00+05:30">November 4, 2026</time></div>
+    <div class="entry-content"><p>Closing Date: 2026-11-14</p>
+      <h3>Job Vacancy Details</h3><table>
+        <tr><td><strong>Organization</strong></td><td>University of Sri Jayewardenepura</td></tr>
+        <tr><td><strong>Sinhala Advertisement Download</strong></td>
+          <td><a href="/dl/technical-officer.pdf">Download PDF</a></td></tr>
+        <tr><td><strong>Source</strong></td><td>sjp.ac.lk</td></tr>
+      </table></div></body></html>"""
+
+    job = parse_job(
+        page,
+        "https://www.gazette.lk/technical-officer-sri-jayewardenepura.html",
+    )
+    post = render_post(job)
+
+    assert [item["label"] for item in job.gazette_details] == [
+        "Organization",
+        "Sinhala Advertisement Download",
+        "Source",
+    ]
+    assert job.job_details_links == [{
+        "text": "Download PDF",
+        "url": "https://www.gazette.lk/dl/technical-officer.pdf",
+    }]
+    assert ">Sinhala Advertisement Download</th>" in post
+    assert ">Source</th>" in post and ">sjp.ac.lk</td>" in post
+    assert 'href="https://www.gazette.lk/dl/technical-officer.pdf"' in post
+    assert "Job Details</h3>" not in post
+
+
+def test_gazette_private_job_uses_details_table_and_excludes_social_rows():
+    from jobbot.web import _job_data, _job_from_data
+
+    page = """<html><body>
+    <span class="cat-links"><a href="https://www.gazette.lk/private-jobs">Private Job Vacancies</a></span>
+    <h1 class="entry-title">Independent ICT Consultant Vacancies 2026</h1>
+    <div class="entry-meta"><time datetime="2026-11-05T10:00:00+05:30">November 5, 2026</time></div>
+    <div class="entry-content"><p>Closing Date: 2026-11-19</p>
+      <h3>Job Vacancy Details</h3><table>
+        <tr><td><strong>Organization</strong></td><td>Management Systems Private Limited</td></tr>
+        <tr><td><strong>English Advertisement Download</strong></td>
+          <td><a href="/dl/advertisement.pdf">Download PDF</a></td></tr>
+        <tr><td><strong>Application Instructions</strong></td>
+          <td><a href="/dl/instructions.pdf">Download PDF</a></td></tr>
+        <tr><td><strong>Application Link</strong></td>
+          <td><a href="https://apply.example.test/">Apply Online</a></td></tr>
+        <tr><td><strong>Source</strong></td><td>Sunday Observer</td></tr>
+        <tr><td><strong>Join Our WhatsApp Channel</strong></td>
+          <td><a href="https://whatsapp.com/channel/no">Click Here</a></td></tr>
+        <tr><td><strong>Follow Our Facebook Page</strong></td>
+          <td><a href="https://facebook.com/gazette">Click Here</a></td></tr>
+      </table></div></body></html>"""
+
+    job = parse_job(
+        page,
+        "https://www.gazette.lk/2026/11/independent-ict-consultant-private.html",
+    )
+    serialized = _job_data(job, configured_labels=["Jobs"])
+    restored = _job_from_data(serialized)
+    restored.company_logo_url = "https://logos.example.test/company.png"
+    post = render_post(restored)
+
+    assert job.gazette_job is True
+    assert job.government_job is False
+    assert job_category(job) == "Private Jobs"
+    assert serialized["suggested_labels"][-1] == "Private Jobs"
+    assert [row["label"] for row in restored.gazette_details] == [
+        "Organization",
+        "English Advertisement Download",
+        "Application Instructions",
+        "Application Link",
+        "Source",
+    ]
+    assert ">Closing date</span>" in post and ">2026-11-19</strong>" in post
+    assert ">English Advertisement Download</th>" in post
+    assert ">Application Instructions</th>" in post
+    assert ">Application Link</th>" in post
+    assert ">Source</th>" in post and ">Sunday Observer</td>" in post
+    assert "whatsapp.com" not in post and "facebook.com" not in post
+    assert "Job Details</h3>" not in post
+    assert "logos.example.test" not in post
+    assert "Job description</h2>" in post
 
 
 def test_job_blogger_metadata_includes_company_position_and_job_category():

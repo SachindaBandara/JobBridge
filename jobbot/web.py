@@ -47,6 +47,8 @@ def _job_data(job: Job, status: str = "ready", configured_labels: list[str] | No
         "date_posted": job.date_posted,
         "valid_through": job.valid_through,
         "visible_closing_date": job.visible_closing_date,
+        "government_job": job.government_job,
+        "gazette_job": job.gazette_job,
         "salary": job.salary,
         "description": description,
         "description_html": sanitize_html(job.description_html),
@@ -56,6 +58,7 @@ def _job_data(job: Job, status: str = "ready", configured_labels: list[str] | No
         "job_details_links": job.job_details_links,
         "application_links": job.application_links,
         "contact_links": job.contact_links,
+        "gazette_details": job.gazette_details,
         "suggested_labels": post_labels(job, configured_labels),
         "blogger_title": post_title(job),
         "search_description": search_description(job),
@@ -75,6 +78,7 @@ def _job_from_data(data: dict) -> Job:
     job_details_links = data.get("job_details_links")
     application_links = data.get("application_links")
     contact_links = data.get("contact_links")
+    gazette_details = data.get("gazette_details")
     return Job(
         title=title,
         source_url=source_url,
@@ -85,6 +89,8 @@ def _job_from_data(data: dict) -> Job:
         date_posted=str(data.get("date_posted") or "")[:100],
         valid_through=str(data.get("valid_through") or "")[:100],
         visible_closing_date=str(data.get("visible_closing_date") or "")[:100],
+        government_job=data.get("government_job") is True,
+        gazette_job=data.get("gazette_job") is True,
         salary=str(data.get("salary") or "")[:200],
         description_html=str(data.get("description_html") or f"<p>{str(data.get('description') or '')}</p>"),
         summary=str(data.get("summary") or "")[:900],
@@ -115,6 +121,15 @@ def _job_from_data(data: dict) -> Job:
             for item in contact_links
             if isinstance(item, dict)
         ][:10] if isinstance(contact_links, list) else [],
+        gazette_details=[
+            {
+                "label": str(item.get("label") or "")[:100],
+                "text": str(item.get("text") or "")[:300],
+                "url": str(item.get("url") or "")[:2000],
+            }
+            for item in gazette_details
+            if isinstance(item, dict)
+        ][:100] if isinstance(gazette_details, list) else [],
     )
 
 

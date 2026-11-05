@@ -21,6 +21,8 @@ class Job:
     date_posted: str = ""
     valid_through: str = ""
     visible_closing_date: str = ""
+    government_job: bool = False
+    gazette_job: bool = False
     salary: str = ""
     description_html: str = ""
     summary: str = ""            # optional AI summary
@@ -30,6 +32,7 @@ class Job:
     job_details_links: list[dict[str, str]] = field(default_factory=list)
     application_links: list[dict[str, str]] = field(default_factory=list)
     contact_links: list[dict[str, str]] = field(default_factory=list)
+    gazette_details: list[dict[str, str]] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     links: list[dict[str, str]] = field(default_factory=list)
 
@@ -267,10 +270,95 @@ def _section_links(soup: BeautifulSoup, base_url: str, heading_text: str) -> lis
 
 def _closing_date(soup: BeautifulSoup) -> str:
     closing = soup.select_one(".closing")
-    if not closing:
+    if closing:
+        text = closing.get_text(" ", strip=True)
+        match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+    else:
+        content = soup.select_one(".entry-content")
+        text = content.get_text(" ", strip=True) if content else ""
+        match = re.search(r"closing\s+date\s*:\s*(\d{4}-\d{2}-\d{2})", text, re.I)
+    return match.group(1) if match else ""
+
+
+_GAZETTE_DETAIL_LABELS = {
+    "join our whatsapp channel",
+    "follow our facebook page",
+}
+
+
+def _is_gazette_advertisement_label(label: str) -> bool:
+    return bool(re.search(r"\badvertisement\s+download$", label, re.I))
+
+
+def _gazette_details(
+    soup: BeautifulSoup,
+    base_url: str,
+) -> tuple[bool, bool, list[dict[str, str]]]:
+    host = (urlparse(base_url).hostname or "").lower().rstrip(".")
+    if host not in ("gazette.lk", "www.gazette.lk"):
+        return False, False, []
+    category_links = soup.select(".cat-links a[href]")
+    gazette_categories = set()
+    for anchor in category_links:
+        category_url = urlparse(urljoin(base_url, anchor["href"]))
+        category_host = (category_url.hostname or "").lower().rstrip(".")
+        if category_host in ("gazette.lk", "www.gazette.lk"):
+            gazette_categories.add(category_url.path.rstrip("/").lower())
+    is_government_job = "/government-jobs" in gazette_categories
+    is_private_job = "/private-jobs" in gazette_categories
+    if not (is_government_job or is_private_job):
+        return False, False, []
+
+    details_heading = next(
+        (
+            heading
+            for heading in soup.select(".entry-content h1, .entry-content h2, .entry-content h3, .entry-content h4")
+            if " ".join(heading.get_text(" ", strip=True).split()).casefold()
+            == "job vacancy details"
+        ),
+        None,
+    )
+    table = details_heading.find_next("table") if details_heading else None
+    details = []
+    if table:
+        for row in table.select("tr"):
+            cells = row.find_all(["th", "td"], recursive=False)
+            if len(cells) < 2:
+                continue
+            label = " ".join(cells[0].get_text(" ", strip=True).split()).rstrip(":")
+            if (
+                label.casefold() in _GAZETTE_DETAIL_LABELS
+                or re.search(r"\b(?:whatsapp|facebook)\b", label, re.I)
+            ):
+                continue
+            anchor = cells[1].find("a", href=True)
+            item = {
+                "label": label,
+                "text": " ".join(cells[1].get_text(" ", strip=True).split()),
+                "url": "",
+            }
+            if anchor:
+                href = urljoin(base_url, anchor["href"].strip())
+                parsed = urlparse(href)
+                if (
+                    parsed.scheme in ("http", "https")
+                    and parsed.hostname
+                    and not parsed.username
+                    and not parsed.password
+                ):
+                    item["url"] = href
+                    item["text"] = " ".join(anchor.get_text(" ", strip=True).split())
+            details.append(item)
+    return True, is_government_job, details
+
+
+def _published_page_date(soup: BeautifulSoup) -> str:
+    node = soup.select_one(".entry-meta time[datetime], time.entry-date[datetime]")
+    value = node.get("datetime", "") if node else ""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
         return ""
-    match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", closing.get_text(" ", strip=True))
-    return match.group(0) if match else ""
 
 
 def _decode_cf_email(value: str) -> str:
@@ -313,6 +401,48 @@ def parse_job(html: str, url: str) -> Job:
     application_links = _section_links(soup, url, "Download Applications")
     contact_links = _contact_links(soup)
     closing_date = _closing_date(soup)
+    gazette_job, government_job, gazette_details = _gazette_details(soup, url)
+    if gazette_job:
+        title_node = soup.select_one(".entry-title")
+        title = (
+            " ".join(title_node.get_text(" ", strip=True).replace("\ufffd", "-").split()).strip(" -")
+            if title_node
+            else ""
+        )
+        organization = next(
+            (item["text"] for item in gazette_details if item["label"].casefold() == "organization"),
+            "",
+        )
+        job_details_links = [
+            {"text": "Download PDF", "url": item["url"]}
+            for item in gazette_details
+            if _is_gazette_advertisement_label(item["label"]) and item["url"]
+        ]
+        application_links = [
+            {
+                "text": f'{item["label"]}: {item["text"]}',
+                "url": item["url"],
+            }
+            for item in gazette_details
+            if item["label"].casefold() in ("application instructions", "application link")
+            and item["url"]
+        ]
+        return Job(
+            title=title or (soup.title.get_text(" ", strip=True) if soup.title else "Job opening"),
+            source_url=url,
+            company=organization,
+            government_job=government_job,
+            gazette_job=True,
+            date_posted=_published_page_date(soup),
+            valid_through=closing_date,
+            visible_closing_date=closing_date,
+            description_html="",
+            job_details_links=job_details_links,
+            application_links=application_links,
+            gazette_details=gazette_details,
+            images=images,
+            links=links,
+        )
     for s in soup.find_all("script", type="application/ld+json"):
         try:
             data = json.loads(s.string or "")

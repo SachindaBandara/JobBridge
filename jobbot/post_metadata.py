@@ -19,6 +19,24 @@ def is_govdoc_source(job) -> bool:
     return source_host == "job.govdoc.lk" or source_host.endswith(".job.govdoc.lk")
 
 
+def is_gazette_government_job(job) -> bool:
+    source_host = (urlsplit(job.source_url or "").hostname or "").lower().rstrip(".")
+    return source_host in ("gazette.lk", "www.gazette.lk") and bool(
+        getattr(job, "government_job", False)
+    )
+
+
+def is_gazette_job(job) -> bool:
+    source_host = (urlsplit(job.source_url or "").hostname or "").lower().rstrip(".")
+    return source_host in ("gazette.lk", "www.gazette.lk") and bool(
+        getattr(job, "gazette_job", False)
+    )
+
+
+def uses_government_post_design(job) -> bool:
+    return is_govdoc_source(job) or is_gazette_job(job)
+
+
 def job_category(job) -> str:
     organization_types = re.sub(r"[\s_-]+", "", job.organization_type or "").lower()
     if "governmentorganization" in organization_types:
@@ -32,6 +50,7 @@ def job_category(job) -> str:
         or _GOVERNMENT_DESCRIPTION_HINTS.search(description)
         or source_host.endswith((".gov", ".gov.lk"))
         or is_govdoc_source(job)
+        or is_gazette_government_job(job)
     ):
         return "Government Jobs"
     return "Private Jobs"

@@ -65,9 +65,12 @@ field, so after saving a draft, copy the generated text from the web interface i
 ## How it works
 `sources → discover links (RSS/Atom, else heuristic page links) → skip already-seen (SQLite) →
 fetch job page → parse schema.org JobPosting JSON-LD (fallback: OpenGraph/text) → [optional Gemini
-summary] → add company logo → render full description → sanitize → Blogger API`.
+summary] → render full description → sanitize → Blogger API`.
 
 Job-ad image URLs may be extracted for review, but are not embedded into Blogger posts.
+Government- and private-category posts from Gazette.lk use the government-post layout and include all
+rows from the article's Job Vacancy Details table except the Join Our WhatsApp Channel and Follow
+Our Facebook Page rows.
 
 ## Security design
 | Risk | Mitigation |

@@ -4,7 +4,11 @@ import re
 from datetime import date, datetime
 from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
-from .post_metadata import is_govdoc_source
+from .post_metadata import (
+    is_gazette_job,
+    is_govdoc_source,
+    uses_government_post_design,
+)
 from .security import sanitize_html
 
 
@@ -34,10 +38,10 @@ def _employment_type(value: str) -> str:
 
 
 def _information_row(job) -> str:
-    govdoc_source = is_govdoc_source(job)
-    location_label = "Closing date" if govdoc_source else "Location"
+    government_design = uses_government_post_design(job)
+    location_label = "Closing date" if government_design else "Location"
     location_value = (
-        _date_only(job.visible_closing_date) if govdoc_source else job.location
+        _date_only(job.visible_closing_date) if government_design else job.location
     ) or "Not specified"
     facts = (
         ("Posted", _date_only(job.date_posted) or "Not specified"),
@@ -64,6 +68,8 @@ def _information_row(job) -> str:
 
 
 def _company_logo(job) -> str:
+    if is_gazette_job(job):
+        return ""
     safe_logo_url = _safe_image_url(job.company_logo_url)
     if not safe_logo_url and is_govdoc_source(job):
         candidate = job.advertisement_image_url
@@ -128,11 +134,11 @@ def _safe_link(value: str) -> str:
     return value
 
 
-def _job_action_sections(job) -> str:
-    sections = (
-        ("Job Details", job.job_details_links),
-        ("Download Applications", job.application_links),
-    )
+def _job_action_sections(job, include_job_details: bool = True) -> str:
+    sections = []
+    if include_job_details:
+        sections.append(("Job Details", job.job_details_links))
+    sections.append(("Download Applications", job.application_links))
     rows = []
     for heading, links in sections:
         buttons = []
@@ -148,8 +154,9 @@ def _job_action_sections(job) -> str:
                 f'font-size:13px;font-weight:500">{label}</a>'
             )
         if buttons:
+            width = "50%" if include_job_details else "100%"
             rows.append(
-                '<td style="width:50%;padding:13px 14px;vertical-align:top;'
+                f'<td style="width:{width};padding:13px 14px;vertical-align:top;'
                 'border:1px solid #dfe5e1;border-radius:6px;background-color:#f5f6f5">'
                 f'<h3 style="margin:0;color:#26332d;text-align:center;font-size:15px;'
                 f'font-weight:600">{html.escape(heading)}</h3>'
@@ -158,7 +165,7 @@ def _job_action_sections(job) -> str:
             )
     if not rows:
         return ""
-    if len(rows) == 1:
+    if len(rows) == 1 and include_job_details:
         rows.append('<td style="width:50%;padding:0"></td>')
     return (
         '<table role="presentation" style="width:100%;margin:0 0 24px;'
@@ -169,10 +176,48 @@ def _job_action_sections(job) -> str:
 
 
 def _govdoc_action_sections(job) -> str:
-    sections = _job_action_sections(job)
+    sections = _job_action_sections(
+        job,
+        include_job_details=not is_gazette_job(job),
+    )
     if not sections:
         return ""
     return f'<div style="margin-top:30px">{sections}</div>'
+
+
+def _gazette_details_table(job) -> str:
+    rows = []
+    for item in job.gazette_details:
+        label = item.get("label", "")
+        if re.search(r"\b(?:whatsapp|facebook)\b", label, re.I):
+            continue
+        label = html.escape(label)
+        text = html.escape(item.get("text", ""))
+        url = _safe_link(item.get("url", ""))
+        value = (
+            f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer" '
+            'style="color:#00e;text-decoration:underline">'
+            f'{text}</a>'
+            if url
+            else text
+        )
+        rows.append(
+            '<tr>'
+            '<th scope="row" style="width:50%;padding:10px 12px;border:1px solid #d9d9d9;'
+            'text-align:center;font-weight:700">'
+            f'{label}</th>'
+            '<td style="width:50%;padding:10px 12px;border:1px solid #d9d9d9;'
+            'text-align:center">'
+            f'{value}</td></tr>'
+        )
+    if not rows:
+        return ""
+    return (
+        '<table style="width:100%;margin-top:16px;border-collapse:collapse;'
+        'font-size:15px;line-height:1.5"><tbody>'
+        + "".join(rows)
+        + '</tbody></table>'
+    )
 
 
 def _contact_section(job) -> str:
@@ -219,10 +264,10 @@ def _contact_section(job) -> str:
 
 
 def render_post(job, excerpt_chars: int = 600) -> str:
-    govdoc_source = is_govdoc_source(job)
+    government_design = uses_government_post_design(job)
     e = html.escape
     summary = ""
-    if job.summary and not govdoc_source:
+    if job.summary and not government_design:
         summary_text = job.summary[:excerpt_chars]
         if len(job.summary) > excerpt_chars:
             summary_text = summary_text.rsplit(" ", 1)[0] + "…"
@@ -236,7 +281,8 @@ def render_post(job, excerpt_chars: int = 600) -> str:
     description_section = (
         '<section style="margin:0;padding:0">'
         f'{_section_heading("Job description")}'
-        f'<div style="color:#35443b;font-size:15px;line-height:1.8">{description}</div>'
+        f'<div style="color:#35443b;font-size:15px;line-height:1.8">{description}'
+        f'{_gazette_details_table(job)}</div>'
         '</section>'
     )
     return (
@@ -247,11 +293,11 @@ def render_post(job, excerpt_chars: int = 600) -> str:
         '<div style="height:4px;margin:0 0 22px;border-radius:3px;background-color:#16805a"></div>'
         f'{_company_logo(job)}'
         f'{_information_row(job)}'
-        f'{"" if govdoc_source else _supplementary_facts(job)}'
+        f'{"" if government_design else _supplementary_facts(job)}'
         f'{summary}'
-        f'{"" if govdoc_source else _job_action_sections(job)}'
-        f'{"" if govdoc_source else _contact_section(job)}'
+        f'{"" if government_design else _job_action_sections(job)}'
+        f'{"" if government_design else _contact_section(job)}'
         f'{description_section}'
-        f'{_govdoc_action_sections(job) if govdoc_source else ""}'
+        f'{_govdoc_action_sections(job) if government_design else ""}'
         '</div>'
     )

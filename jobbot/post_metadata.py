@@ -14,18 +14,24 @@ _GOVERNMENT_DESCRIPTION_HINTS = re.compile(
 )
 
 
+def is_govdoc_source(job) -> bool:
+    source_host = (urlsplit(job.source_url or "").hostname or "").lower().rstrip(".")
+    return source_host == "job.govdoc.lk" or source_host.endswith(".job.govdoc.lk")
+
+
 def job_category(job) -> str:
     organization_types = re.sub(r"[\s_-]+", "", job.organization_type or "").lower()
     if "governmentorganization" in organization_types:
         return "Government Jobs"
 
-    source_host = urlsplit(job.source_url or "").hostname or ""
+    source_host = (urlsplit(job.source_url or "").hostname or "").lower().rstrip(".")
     employer_and_title = " ".join((job.company or "", job.title or ""))
     description = job.description_html or ""
     if (
         _GOVERNMENT_HINTS.search(employer_and_title)
         or _GOVERNMENT_DESCRIPTION_HINTS.search(description)
-        or source_host.lower().endswith((".gov", ".gov.lk"))
+        or source_host.endswith((".gov", ".gov.lk"))
+        or is_govdoc_source(job)
     ):
         return "Government Jobs"
     return "Private Jobs"

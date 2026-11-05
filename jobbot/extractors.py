@@ -20,12 +20,16 @@ class Job:
     employment_type: str = ""
     date_posted: str = ""
     valid_through: str = ""
+    visible_closing_date: str = ""
     salary: str = ""
     description_html: str = ""
     summary: str = ""            # optional AI summary
     labels: list = field(default_factory=list)
     company_logo_url: str = ""
     advertisement_image_url: str = ""
+    job_details_links: list[dict[str, str]] = field(default_factory=list)
+    application_links: list[dict[str, str]] = field(default_factory=list)
+    contact_links: list[dict[str, str]] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     links: list[dict[str, str]] = field(default_factory=list)
 
@@ -244,9 +248,71 @@ def _page_assets(soup: BeautifulSoup, base_url: str) -> tuple[list[str], list[di
     return images, links
 
 
+def _section_links(soup: BeautifulSoup, base_url: str, heading_text: str) -> list[dict[str, str]]:
+    for section in soup.select(".view_info"):
+        heading = section.select_one(".title h1, .title h2, .title h3, .title h4, .title h5, .title h6")
+        if not heading or heading.get_text(" ", strip=True).casefold() != heading_text.casefold():
+            continue
+        links = []
+        for anchor in section.select(".buttons a[href]"):
+            href = urljoin(base_url, anchor["href"].strip())
+            parsed = urlparse(href)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+                continue
+            text = " ".join(anchor.get_text(" ", strip=True).split()) or "Open"
+            links.append({"text": text[:200], "url": href})
+        return links
+    return []
+
+
+def _closing_date(soup: BeautifulSoup) -> str:
+    closing = soup.select_one(".closing")
+    if not closing:
+        return ""
+    match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", closing.get_text(" ", strip=True))
+    return match.group(0) if match else ""
+
+
+def _decode_cf_email(value: str) -> str:
+    try:
+        key = int(value[:2], 16)
+        return "".join(
+            chr(int(value[index:index + 2], 16) ^ key)
+            for index in range(2, len(value), 2)
+        )
+    except (ValueError, TypeError):
+        return ""
+
+
+def _contact_links(soup: BeautifulSoup) -> list[dict[str, str]]:
+    contacts = []
+    seen = set()
+    for anchor in soup.select(".contact-wrp a[href]"):
+        href = anchor["href"].strip()
+        text = " ".join(anchor.get_text(" ", strip=True).split())
+        if href.lower().startswith("tel:"):
+            contact = {"text": text or href[4:], "url": href, "type": "phone"}
+        elif href.lower().startswith("mailto:"):
+            contact = {"text": text or href[7:], "url": href, "type": "email"}
+        else:
+            encoded = anchor.select_one("[data-cfemail]")
+            email = _decode_cf_email(encoded.get("data-cfemail", "")) if encoded else ""
+            if not email or "@" not in email:
+                continue
+            contact = {"text": email, "url": f"mailto:{email}", "type": "email"}
+        if contact["url"] not in seen:
+            contacts.append(contact)
+            seen.add(contact["url"])
+    return contacts
+
+
 def parse_job(html: str, url: str) -> Job:
     soup = BeautifulSoup(html, "lxml")
     images, links = _page_assets(soup, url)
+    job_details_links = _section_links(soup, url, "Job Details")
+    application_links = _section_links(soup, url, "Download Applications")
+    contact_links = _contact_links(soup)
+    closing_date = _closing_date(soup)
     for s in soup.find_all("script", type="application/ld+json"):
         try:
             data = json.loads(s.string or "")
@@ -264,7 +330,8 @@ def parse_job(html: str, url: str) -> Job:
                     location=_location(node.get("jobLocation")) or _s(node.get("applicantLocationRequirements")),
                     employment_type=_s(node.get("employmentType")),
                     date_posted=_s(node.get("datePosted")),
-                    valid_through=_s(node.get("validThrough")),
+                    valid_through=closing_date or _s(node.get("validThrough")),
+                    visible_closing_date=closing_date,
                     salary=_salary(node.get("baseSalary")),
                     description_html=_s(node.get("description")),
                     company_logo_url=_logo_url(
@@ -272,6 +339,9 @@ def parse_job(html: str, url: str) -> Job:
                         url,
                     ),
                     advertisement_image_url=_advertisement_image(soup, url, node.get("image")),
+                    job_details_links=job_details_links,
+                    application_links=application_links,
+                    contact_links=contact_links,
                     images=images,
                     links=links,
                 )
@@ -297,7 +367,12 @@ def parse_job(html: str, url: str) -> Job:
         title=title,
         source_url=url,
         description_html=description,
+        valid_through=closing_date,
+        visible_closing_date=closing_date,
         advertisement_image_url=_advertisement_image(soup, url),
+        job_details_links=job_details_links,
+        application_links=application_links,
+        contact_links=contact_links,
         images=images,
         links=links,
     )

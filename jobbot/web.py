@@ -46,12 +46,16 @@ def _job_data(job: Job, status: str = "ready", configured_labels: list[str] | No
         "employment_type": job.employment_type,
         "date_posted": job.date_posted,
         "valid_through": job.valid_through,
+        "visible_closing_date": job.visible_closing_date,
         "salary": job.salary,
         "description": description,
         "description_html": sanitize_html(job.description_html),
         "summary": job.summary,
         "company_logo_url": job.company_logo_url,
         "advertisement_image_url": job.advertisement_image_url,
+        "job_details_links": job.job_details_links,
+        "application_links": job.application_links,
+        "contact_links": job.contact_links,
         "suggested_labels": post_labels(job, configured_labels),
         "blogger_title": post_title(job),
         "search_description": search_description(job),
@@ -68,6 +72,9 @@ def _job_from_data(data: dict) -> Job:
     source_url = str(data.get("source_url") or "").strip()
     if not title or not source_url:
         raise APIError("The job title and source URL are required.")
+    job_details_links = data.get("job_details_links")
+    application_links = data.get("application_links")
+    contact_links = data.get("contact_links")
     return Job(
         title=title,
         source_url=source_url,
@@ -77,11 +84,37 @@ def _job_from_data(data: dict) -> Job:
         employment_type=str(data.get("employment_type") or "")[:200],
         date_posted=str(data.get("date_posted") or "")[:100],
         valid_through=str(data.get("valid_through") or "")[:100],
+        visible_closing_date=str(data.get("visible_closing_date") or "")[:100],
         salary=str(data.get("salary") or "")[:200],
         description_html=str(data.get("description_html") or f"<p>{str(data.get('description') or '')}</p>"),
         summary=str(data.get("summary") or "")[:900],
         company_logo_url=str(data.get("company_logo_url") or "")[:2000],
         advertisement_image_url=str(data.get("advertisement_image_url") or "")[:2000],
+        job_details_links=[
+            {
+                "text": str(item.get("text") or "")[:200],
+                "url": str(item.get("url") or "")[:2000],
+            }
+            for item in job_details_links
+            if isinstance(item, dict)
+        ][:20] if isinstance(job_details_links, list) else [],
+        application_links=[
+            {
+                "text": str(item.get("text") or "")[:200],
+                "url": str(item.get("url") or "")[:2000],
+            }
+            for item in application_links
+            if isinstance(item, dict)
+        ][:20] if isinstance(application_links, list) else [],
+        contact_links=[
+            {
+                "text": str(item.get("text") or "")[:200],
+                "url": str(item.get("url") or "")[:500],
+                "type": str(item.get("type") or "")[:20],
+            }
+            for item in contact_links
+            if isinstance(item, dict)
+        ][:10] if isinstance(contact_links, list) else [],
     )
 
 

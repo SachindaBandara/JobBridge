@@ -1,6 +1,7 @@
 import json
 import threading
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 import pytest
@@ -25,6 +26,20 @@ def test_sanitize_strips_scripts():
     out = sanitize_html('<p onclick="x()">Hi</p><script>alert(1)</script><a href="javascript:evil()">a</a>')
     assert "<script" not in out and "onclick" not in out and "javascript:" not in out
     assert "style=" not in sanitize_html('<p style="color:red;background:url(javascript:alert(1))">Safe text</p>')
+
+
+def test_frontend_hides_source_image_and_page_link_panels():
+    static_dir = Path(__file__).parent.parent / "jobbot" / "static"
+    app_js = (static_dir / "app.js").read_text(encoding="utf-8")
+    app_css = (static_dir / "app.css").read_text(encoding="utf-8")
+
+    assert "SOURCE IMAGES" not in app_js
+    assert "PAGE LINKS" not in app_js
+    assert "makeAssetColumn" not in app_js
+    assert "makeImage" not in app_js
+    assert "makeLink" not in app_js
+    assert "job-assets" not in app_css
+    assert "generated-preview" in app_js
 
 
 @pytest.mark.parametrize("weight", ["bold", "bolder", "600", "700", "900", "700 !important"])
@@ -97,7 +112,7 @@ def test_job_logo_dates_and_full_description_render_without_metadata_or_source()
     assert "Apply before" not in post and "2027-02-02" not in post
     assert "family=Montserrat" in post and "font-family:Montserrat,Arial,Helvetica,sans-serif" in post
     assert "Job description</h2>" in post
-    assert "background-color:#f3f8f4" in post
+    assert "background-color:#f4f8f5" in post
     assert "First paragraph with the complete role details." in post
     assert "<li>Second detail.</li>" in post
     assert "Company:" not in post and "Type:" not in post
@@ -143,6 +158,68 @@ def test_blogger_template_preserves_bold_description_text_through_web_round_trip
     assert "font-weight:700" not in post
 
 
+def test_jobgovdoc_sections_and_contacts_survive_publish_round_trip():
+    from jobbot.web import _job_data, _job_from_data
+
+    email = "jobs@rusl.lk"
+    key = 42
+    encoded_email = f"{key:02x}" + "".join(
+        f"{ord(char) ^ key:02x}" for char in email
+    )
+    page = f"""<html><body>
+    <div class="closing">Closing Date: 2026-11-10</div>
+    <div class="view_info ad"><div class="title"><h3>Job Details</h3></div>
+      <div class="buttons"><a href="/view?id=15678&amp;fid=detail">English</a></div></div>
+    <div class="view_info ap"><div class="title"><h3>Download Applications</h3></div>
+      <div class="buttons"><a href="/cv-format">Model Applications</a></div></div>
+    <div class="contact-wrp">
+      <a href="tel:+94112555555">+94 11 255 5555</a>
+      <a href="#email"><span class="__cf_email__" data-cfemail="{encoded_email}">[email protected]</span></a>
+    </div>
+    <script type="application/ld+json">
+    {{"@type":"JobPosting","title":"Demonstrator","datePosted":"2026-11-05",
+      "validThrough":"2026-11-05","employmentType":"CASUAL",
+      "hiringOrganization":{{"name":"Rajarata University of Sri Lanka"}},
+      "baseSalary":{{"currency":"LKR","value":{{"value":62116,"unitText":"MONTHLY"}}}},
+      "image":"https://govdoc.nyc3.cdn.digitaloceanspaces.com/prod_job/logo/rusl-logo.png",
+      "description":"<p>Demonstrator vacancy details.</p>"}}
+    </script></body></html>"""
+
+    job = parse_job(page, "https://job.govdoc.lk/demonstrator-rajarata-university")
+    job.summary = "This summary must not be added to a govdoc post."
+    restored = _job_from_data(_job_data(job))
+    post = render_post(restored)
+
+    assert job.valid_through == "2026-11-10"
+    assert job.salary == "62116 LKR MONTHLY"
+    assert restored.job_details_links == [{
+        "text": "English",
+        "url": "https://job.govdoc.lk/view?id=15678&fid=detail",
+    }]
+    assert restored.application_links == [{
+        "text": "Model Applications",
+        "url": "https://job.govdoc.lk/cv-format",
+    }]
+    assert {item["url"] for item in restored.contact_links} == {
+        "tel:+94112555555",
+        "mailto:jobs@rusl.lk",
+    }
+    assert "Job Details</h3>" in post and ">English</a>" in post
+    assert "Download Applications</h3>" in post and ">Model Applications</a>" in post
+    assert 'src="https://govdoc.nyc3.cdn.digitaloceanspaces.com/prod_job/logo/rusl-logo.png"' in post
+    assert post.index("rusl-logo.png") < post.index(">Posted</span>")
+    assert ">Closing date</span>" in post and ">2026-11-10</strong>" in post
+    assert ">Location</span>" not in post
+    assert "Salary" not in post and "62116 LKR MONTHLY" not in post
+    assert "Phone</strong>" not in post and "Email</strong>" not in post
+    assert "mailto:jobs@rusl.lk" not in post and "tel:+94112555555" not in post
+    assert "At a glance" not in post and "This summary must not" not in post
+    assert post.index("Job description</h2>") < post.index("Job Details</h3>")
+    assert post.index("Job description</h2>") < post.index("Download Applications</h3>")
+    assert 'style="margin-top:30px"' in post
+    assert post.count("<h2") == 1 and post.count("<h3") == 2
+
+
 def test_job_blogger_metadata_includes_company_position_and_job_category():
     from jobbot.extractors import Job
 
@@ -182,6 +259,48 @@ def test_job_blogger_metadata_defaults_to_private_for_unmarked_employers():
     assert job_category(job) == "Private Jobs"
     assert "Private Jobs" in post_labels(job)
     assert search_description(job) == "Private Jobs: Software Engineer at Acme Ltd"
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "https://job.govdoc.lk",
+        "https://job.govdoc.lk/demonstrator-rajarata-university-of-sri-lanka-9721",
+        "https://careers.job.govdoc.lk/jobs/123",
+    ],
+)
+def test_govdoc_source_gets_government_jobs_label(source_url):
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Demonstrator",
+        source_url=source_url,
+        company="Rajarata University of Sri Lanka",
+    )
+
+    labels = post_labels(job, ["Jobs"])
+    assert labels == [
+        "Rajarata University of Sri Lanka",
+        "Demonstrator",
+        "Government Jobs",
+    ]
+    assert "Private Jobs" not in labels
+    assert job_category(job) == "Government Jobs"
+    assert search_description(job) == (
+        "Government Jobs: Demonstrator at Rajarata University of Sri Lanka"
+    )
+
+
+def test_lookalike_govdoc_domain_does_not_get_government_category():
+    from jobbot.extractors import Job
+
+    job = Job(
+        title="Demonstrator",
+        source_url="https://job.govdoc.lk.example.com/jobs/123",
+        company="Rajarata University",
+    )
+
+    assert job_category(job) == "Private Jobs"
 
 
 def test_blogger_title_uses_position_and_company():
@@ -433,6 +552,19 @@ def test_web_new_post_publishes_template_and_job_labels(monkeypatch, tmp_path):
         "date_posted": "2026-11-04",
         "valid_through": "2027-02-02",
         "description_html": "<p>Public service role.</p>",
+        "job_details_links": [{
+            "text": "English",
+            "url": "https://jobs.example.com/details.pdf",
+        }],
+        "application_links": [{
+            "text": "Model Applications",
+            "url": "https://jobs.example.com/application",
+        }],
+        "contact_links": [{
+            "text": "+94 11 255 5555",
+            "url": "tel:+94112555555",
+            "type": "phone",
+        }],
     }
     try:
         request = Request(
@@ -455,6 +587,11 @@ def test_web_new_post_publishes_template_and_job_labels(monkeypatch, tmp_path):
         assert ">Employment type</span>" in captured["content"]
         assert ">Full Time</strong>" in captured["content"]
         assert "Apply before" not in captured["content"]
+        assert "Job Details</h3>" in captured["content"]
+        assert '>English</a>' in captured["content"]
+        assert "Download Applications</h3>" in captured["content"]
+        assert '>Model Applications</a>' in captured["content"]
+        assert "tel:+94112555555" in captured["content"]
         assert result["labels"] == captured["labels"]
         assert result["title"] == captured["title"]
         assert result["search_description"] == "Government Jobs: Public Health Inspector at Ministry of Health"

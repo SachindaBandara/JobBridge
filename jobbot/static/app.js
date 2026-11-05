@@ -37,28 +37,6 @@ function safeExternalUrl(value) {
   }
 }
 
-function makeAssetColumn(title, items, formatter) {
-  const column = node("div", "asset-column");
-  const heading = node("div", "asset-title");
-  heading.append(node("span", "", title), node("span", "asset-count", `${items.length} found`));
-  column.append(heading);
-  const list = node("div", "asset-list");
-  if (!items.length) list.append(node("span", "asset-item", "None found"));
-  items.forEach((item, index) => list.append(formatter(item, index)));
-  column.append(list);
-  return column;
-}
-
-function makeLink(link, index) {
-  const label = link.text || `Link ${index + 1}`;
-  return node("div", "asset-item", `${label} — ${link.url}`);
-}
-
-function makeImage(url, index) {
-  const row = node("div", "asset-item", `Image ${index + 1} — ${url}`);
-  return row;
-}
-
 function appendFact(container, label, value) {
   if (!value) return;
   const fact = node("span");
@@ -113,13 +91,6 @@ function renderJob(job) {
   }
   if (job.summary) card.append(node("div", "ai-summary", job.summary));
 
-  const assetGrid = node("div", "job-assets");
-  assetGrid.append(
-    makeAssetColumn("SOURCE IMAGES", job.images || [], makeImage),
-    makeAssetColumn("PAGE LINKS", job.links || [], makeLink)
-  );
-  card.append(assetGrid);
-
   const actions = node("div", "card-actions");
   if (sourceUrl) {
     const source = node("a", "", "Open original ↗");
@@ -137,7 +108,7 @@ function renderJob(job) {
       const result = await request("/api/summarize", {job});
       job.summary = result.summary;
       const summary = node("div", "ai-summary", result.summary);
-      card.insertBefore(summary, assetGrid);
+      card.insertBefore(summary, actions);
       summaryButton.textContent = "Summary ready";
     } catch (error) {
       summaryButton.disabled = false;
@@ -157,7 +128,7 @@ function renderJob(job) {
       preview.src = result.image_url;
       preview.alt = `AI-generated illustration for ${job.title}`;
       preview.className = "generated-preview";
-      assetGrid.firstElementChild.append(preview);
+      card.insertBefore(preview, actions);
       imageButton.textContent = "Image generated";
     } catch (error) {
       imageButton.disabled = false;

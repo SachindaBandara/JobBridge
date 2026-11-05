@@ -50,6 +50,9 @@ one, with the full available description and details. You can request a
 Gemini summary or generated illustration for a job, and save it as a Blogger draft. The interface listens
 on loopback only; it does not automatically publish posts. Source pages are fetched with the same
 robots.txt and SSRF protections as the CLI.
+For job.govdoc.lk listings, the post template also includes the page's visible closing date and salary,
+the "Job Details" and "Download Applications" links, and available phone/email contacts. These buttons
+open the source-provided resources; JobBridge does not download application files.
 The history panel can remove individual entries or clear local history; these actions never delete
 Blogger posts. Clearing history allows previously processed source URLs to be imported again.
 New Blogger posts receive labels for configured labels other than the generic `Jobs` label,
